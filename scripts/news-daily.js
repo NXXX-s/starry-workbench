@@ -22,21 +22,6 @@ const AI_SOURCES = [
   { url: 'https://huggingface.co/blog/feed.xml',    name: 'HuggingFace', lang: 'en' }
 ];
 
-/* Bing 新闻聚合（中英双语关键词，国内媒体源，服务器可达） */
-async function fetchBingNews(query, name, lang){
-  try{
-    const feed = await parser.parseURL('https://www.bing.com/news/search?q=' + encodeURIComponent(query) + '&format=RSS');
-    return (feed.items || []).slice(0, 8).map(it => ({
-      title: (it.title || '').trim().slice(0, 200),
-      summary: ((it.contentSnippet || '').trim().slice(0, 180)),
-      url: it.link,
-      source: name,
-      lang,
-      published_at: new Date(it.isoDate || it.pubDate || Date.now()).toISOString()
-    })).filter(x => x.title && x.url);
-  }catch(e){ return []; }
-}
-
 async function fetchRSS(src){
   try{
     const feed = await parser.parseURL(src.url);
