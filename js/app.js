@@ -43,11 +43,12 @@ async function emailMxOk(email){
   try{
     const domain = email.split('@')[1];
     const res = await fetch('https://dns.alidns.com/resolve?name=' + encodeURIComponent(domain) + '&type=MX', { headers: { 'accept': 'application/dns-json' } });
-    if(!res.ok) return null;
+    if(!res.ok) return null;                       // HTTP 异常 → 未知
     const j = await res.json();
-    if(!j || !Array.isArray(j.Answer)) return null;
+    if(!j || typeof j !== 'object') return null;
+    if(!Array.isArray(j.Answer)) return false;     // 有效响应但无 MX 记录（NXDOMAIN/无MX）→ 明确无效
     return j.Answer.length > 0;
-  }catch(e){ return null; }
+  }catch(e){ return null; }                        // 网络异常 → 未知
 }
 
 /* ---------- 登录 / 注册 ---------- */
@@ -98,7 +99,10 @@ $('auth-btn').addEventListener('click', async () => {
       if(error) throw error;
     }
   }catch(e){
-    authErr(e.message || '操作失败');
+    const m = e.message || '';
+    authErr(/email.*invalid|invalid.*email|email_address_invalid/i.test(m)
+      ? '该邮箱无法注册（无效或不允许的邮箱），请换个邮箱试试'
+      : (/rate\s?limit/i.test(m) ? '注册太频繁，请等几分钟再试' : m));
   }finally{ btn.disabled = false; }
 });
 $('logout-btn').addEventListener('click', () => { sb.auth.signOut(); });
