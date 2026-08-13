@@ -16,10 +16,26 @@ const parser = new Parser({ timeout: 15000 });
 const AI_SOURCES = [
   { url: 'https://www.jiqizhixin.com/rss',          name: '机器之心',  lang: 'zh' },
   { url: 'https://www.qbitai.com/feed',             name: '量子位',    lang: 'zh' },
+  { url: 'https://www.ithome.com/rss/',             name: 'IT之家',    lang: 'zh' },
   { url: 'https://openai.com/news/rss.xml',         name: 'OpenAI 官方', lang: 'en' },
   { url: 'https://rss.arxiv.org/rss/cs.AI',         name: 'arXiv cs.AI', lang: 'en' },
   { url: 'https://huggingface.co/blog/feed.xml',    name: 'HuggingFace', lang: 'en' }
 ];
+
+/* Bing 新闻聚合（中英双语关键词，国内媒体源，服务器可达） */
+async function fetchBingNews(query, name, lang){
+  try{
+    const feed = await parser.parseURL('https://www.bing.com/news/search?q=' + encodeURIComponent(query) + '&format=RSS');
+    return (feed.items || []).slice(0, 8).map(it => ({
+      title: (it.title || '').trim().slice(0, 200),
+      summary: ((it.contentSnippet || '').trim().slice(0, 180)),
+      url: it.link,
+      source: name,
+      lang,
+      published_at: new Date(it.isoDate || it.pubDate || Date.now()).toISOString()
+    })).filter(x => x.title && x.url);
+  }catch(e){ return []; }
+}
 
 async function fetchRSS(src){
   try{
@@ -32,6 +48,55 @@ async function fetchRSS(src){
       lang: src.lang,
       published_at: new Date(it.isoDate || it.pubDate || Date.now()).toISOString()
     })).filter(x => x.title && x.url);
+  }catch(e){ return []; }
+}
+
+/* ============================================================
+   三角洲新闻源（RSS + 关键词过滤）：
+   PC Gamer / IGN（英文）+ 机核（中文）+ Google News 兜底（GitHub 服务器可达）
+   ============================================================ */
+const DELTA_RSS = [
+  { url: 'https://www.pcgamer.com/rss/', name: 'PC Gamer', lang: 'en' },
+  { url: 'https://feeds.ign.com/ign/all', name: 'IGN', lang: 'en' },
+  { url: 'https://www.gcores.com/rss', name: '机核', lang: 'zh' }
+];
+const DELTA_RE = /delta\s?force|hawk\s?ops|三角洲/i;
+
+async function fetchDeltaRSS(){
+  const results = await Promise.all(DELTA_RSS.map(async s => {
+    try{
+      const feed = await parser.parseURL(s.url);
+      return (feed.items || [])
+        .filter(it => DELTA_RE.test((it.title || '') + ' ' + (it.contentSnippet || '')))
+        .slice(0, 6)
+        .map(it => ({
+          title: (it.title || '').trim().slice(0, 200),
+          summary: ((it.contentSnippet || '').trim().slice(0, 180)),
+          url: it.link,
+          source: s.name,
+          lang: s.lang,
+          published_at: new Date(it.isoDate || it.pubDate || Date.now()).toISOString()
+        }))
+        .filter(x => x.title && x.url);
+    }catch(e){ return []; }
+  }));
+  return results.flat();
+}
+
+/* Google News 聚合（GitHub Runner 可达；本地网络不通会自动跳过） */
+async function fetchGoogleNews(){
+  try{
+    const feed = await parser.parseURL('https://news.google.com/rss/search?q=' + encodeURIComponent('三角洲行动 OR "Delta Force"') + '&hl=zh-CN&gl=CN&ceid=CN:zh-Hans');
+    return (feed.items || []).filter(it => DELTA_RE.test((it.title || '') + ' ' + (it.contentSnippet || '')))
+      .slice(0, 6)
+      .map(it => ({
+        title: (it.title || '').trim().slice(0, 200),
+        summary: ((it.contentSnippet || '').trim().slice(0, 180)),
+        url: it.link,
+        source: 'Google 新闻',
+        lang: /[\u4e00-\u9fa5]/.test(it.title || '') ? 'zh' : 'en',
+        published_at: new Date(it.isoDate || it.pubDate || Date.now()).toISOString()
+      }));
   }catch(e){ return []; }
 }
 
@@ -81,6 +146,9 @@ async function fetchDelta(){
       });
     }
   }catch(e){ /* 官网不可用则跳过 */ }
+  /* RSS 源（PC Gamer / IGN / 机核）+ Google News 兜底 */
+  const [rssItems, googleItems] = await Promise.all([fetchDeltaRSS(), fetchGoogleNews()]);
+  items.push(...rssItems, ...googleItems);
   return items;
 }
 
