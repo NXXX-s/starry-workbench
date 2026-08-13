@@ -314,6 +314,16 @@ h1 .g{background:linear-gradient(90deg,var(--cyan),var(--violet),var(--magenta))
 .set-actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
 .btn-ghost{background:var(--chip);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:10px 18px;font-size:12.5px;cursor:pointer;font-family:inherit;transition:.2s}
 .btn-ghost:hover{border-color:var(--cyan);color:var(--cyan)}
+/* ===== 账号管理 ===== */
+.admin-row{display:flex;align-items:center;gap:10px;padding:10px 2px;border-bottom:1px dashed rgba(120,160,255,.14);flex-wrap:wrap}
+.admin-row:last-child{border-bottom:0}
+.admin-row .ar-main{flex:1;min-width:180px}
+.admin-row b{font-size:13px}
+.admin-row small{display:block;color:var(--muted);font-size:10.5px;margin-top:2px}
+.admin-row .ar-actions{display:flex;gap:6px}
+.admin-row .ar-actions button{background:var(--chip);border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer;font-family:inherit;transition:.2s}
+.admin-row .ar-actions button:hover{color:var(--cyan);border-color:rgba(0,245,255,.5)}
+.admin-row .ar-actions button.danger:hover{color:var(--magenta);border-color:rgba(255,46,147,.5)}
 /* ===== 新手引导聚光灯 ===== */
 .tour-mask{position:fixed;inset:0;z-index:300;display:none}
 .tour-mask.show{display:block}

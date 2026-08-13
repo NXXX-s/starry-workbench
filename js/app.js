@@ -31,8 +31,8 @@ const supabase = window.supabase.createClient(
   window.APP_CONFIG.supabaseUrl,
   window.APP_CONFIG.supabaseAnonKey
 );
-let USER = null, PROFILE = null;
-const DB = { todos:[], assets:[], sbs:[], ideas:[], pals:[], comps:[], reqs:[], news:[], books:[], quotes:[], shelf:[], settings:{} };
+let USER = null, PROFILE = null, IS_ADMIN = false;
+const DB = { todos:[], assets:[], sbs:[], ideas:[], pals:[], comps:[], reqs:[], news:[], books:[], quotes:[], shelf:[], settings:{}, adminUsers:[] };
 
 function setSync(txt){ $('sync-state').textContent = txt; }
 function authErr(msg){ $('auth-err').textContent = msg; }
@@ -132,6 +132,12 @@ async function loadAll(){
     DB.ideas = i.data || []; DB.pals = pa.data || []; DB.comps = c.data || [];
     DB.reqs = r.data || []; DB.news = n.data || []; DB.books = b.data || [];
     DB.quotes = q.data || []; DB.shelf = sh.data || []; DB.settings = st.data || {};
+    /* 管理员探测（非管理员会抛错，静默忽略） */
+    IS_ADMIN = false; DB.adminUsers = [];
+    try{
+      const { data: au } = await supabase.rpc('admin_list_users');
+      if(Array.isArray(au)){ IS_ADMIN = true; DB.adminUsers = au; }
+    }catch(e){ /* 非管理员 */ }
     setSync('☁ 已同步 · 📱 多端互通');
     renderAll();
   }catch(e){
@@ -145,6 +151,43 @@ function renderAll(){
   renderHome(); renderTodos(); renderAssets(); renderSbs();
   renderIdeas(); renderPals(); renderComps(); renderReqs();
   renderNews(); renderBooks(); renderShelf(); renderQuote();
+  renderAdminPanel();
+}
+
+/* ---------- 账号管理（管理员） ---------- */
+function renderAdminPanel(){
+  if(!IS_ADMIN) return;
+  $('admin-list').innerHTML = DB.adminUsers.map(u => `
+    <div class="admin-row">
+      <div class="ar-main"><b>${esc(u.nickname)}${u.id === USER.id ? '（我）' : ''}</b>
+        <small>${esc(u.email)} · 注册 ${new Date(u.created_at).toLocaleDateString('zh-CN')}${u.last_sign_in_at ? ' · 最近登录 ' + new Date(u.last_sign_in_at).toLocaleDateString('zh-CN') : ''}${u.banned_until ? ' · <span style="color:var(--magenta)">⛔ 已封禁</span>' : ''}</small></div>
+      <div class="ar-actions">
+        <button data-uid="${u.id}" data-act="admin">${u.is_admin ? '取消管理' : '设为管理'}</button>
+        <button data-uid="${u.id}" data-act="ban">${u.banned_until ? '解封' : '封禁7天'}</button>
+        <button data-uid="${u.id}" data-act="del" class="danger">删除</button>
+      </div>
+    </div>`).join('') || '<div class="empty">暂无用户</div>';
+  $('admin-list').querySelectorAll('button').forEach(btn => btn.addEventListener('click', async () => {
+    const uid = btn.dataset.uid, act = btn.dataset.act;
+    const u = DB.adminUsers.find(x => x.id === uid);
+    if(!u) return;
+    try{
+      if(act === 'admin'){
+        await supabase.rpc('admin_set_admin', { uid, make_admin: !u.is_admin });
+        toast(u.is_admin ? '👑 已取消该用户管理员' : '👑 已设为管理员');
+      }else if(act === 'ban'){
+        if(!u.banned_until && !confirm('确认封禁 ' + (u.email || u.nickname) + ' 7 天？封禁期间无法登录。')) return;
+        await supabase.rpc('admin_ban_user', { uid, days: u.banned_until ? 0 : 7 });
+        toast(u.banned_until ? '✅ 已解封' : '⛔ 已封禁 7 天');
+      }else if(act === 'del'){
+        if(u.id === USER.id){ toast('⚠ 不能删除自己的账号'); return; }
+        if(!confirm('确认删除账号 ' + (u.email || u.nickname) + '？\n该用户的所有数据将永久清除，不可恢复！')) return;
+        await supabase.rpc('admin_delete_user', { uid });
+        toast('🗑 账号已删除');
+      }
+      loadAll();
+    }catch(e){ toast('⚠ ' + (e.message || '操作失败')); }
+  }));
 }
 
 /* ---------- 首页 ---------- */
