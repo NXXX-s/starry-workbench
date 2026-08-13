@@ -27,7 +27,7 @@ const CAT_COLOR = { '剪辑':'#00f5ff', '设计':'#ff2e93', '情报':'#ffd166', 
 if(!window.APP_CONFIG || !window.APP_CONFIG.supabaseUrl || window.APP_CONFIG.supabaseUrl.includes('YOUR-PROJECT')){
   $('auth-err').textContent = '⚠ 请先配置 js/config.js（参考 config.example.js）';
 }
-const supabase = window.supabase.createClient(
+const sb = window.supabase.createClient(
   window.APP_CONFIG.supabaseUrl,
   window.APP_CONFIG.supabaseAnonKey
 );
@@ -53,30 +53,30 @@ $('auth-btn').addEventListener('click', async () => {
   const btn = $('auth-btn'); btn.disabled = true; authErr('');
   try{
     if(authMode === 'register'){
-      const { data, error } = await supabase.auth.signUp({ email, password: pass });
+      const { data, error } = await sb.auth.signUp({ email, password: pass });
       if(error) throw error;
       const nick = $('auth-nick').value.trim();
       if(nick && data.user){
-        await supabase.from('profiles').update({ nickname: nick }).eq('id', data.user.id);
+        await sb.from('profiles').update({ nickname: nick }).eq('id', data.user.id);
       }
       toast('✨ 注册成功，请查收确认邮件后登录');
       authMode = 'login';
       document.querySelectorAll('[data-amode]')[0].click();
     } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+      const { error } = await sb.auth.signInWithPassword({ email, password: pass });
       if(error) throw error;
     }
   }catch(e){
     authErr(e.message || '操作失败');
   }finally{ btn.disabled = false; }
 });
-$('logout-btn').addEventListener('click', () => { supabase.auth.signOut(); });
+$('logout-btn').addEventListener('click', () => { sb.auth.signOut(); });
 
 async function restoreSession(){
-  const { data } = await supabase.auth.getSession();
+  const { data } = await sb.auth.getSession();
   if(data.session) onAuth(data.session.user);
 }
-supabase.auth.onAuthStateChange((_ev, session) => {
+sb.auth.onAuthStateChange((_ev, session) => {
   if(session) onAuth(session.user);
   else onLogout();
 });
@@ -113,19 +113,19 @@ async function loadAll(){
   setSync('☁ 同步中…');
   try{
     const [p, t, a, s, i, pa, c, r, n, b, q, sh, st] = await Promise.all([
-      supabase.from('profiles').select('*').single(),
-      supabase.from('todos').select('*').order('created_at'),
-      supabase.from('assets').select('*').order('created_at', { ascending: false }),
-      supabase.from('storyboards').select('*').order('shot_no'),
-      supabase.from('inspirations').select('*').order('created_at', { ascending: false }),
-      supabase.from('palettes').select('*').order('created_at', { ascending: false }),
-      supabase.from('components').select('*').order('created_at', { ascending: false }),
-      supabase.from('requirements').select('*').order('created_at', { ascending: false }),
-      supabase.from('news').select('*').order('published_at', { ascending: false }).limit(30),
-      supabase.from('books').select('*').order('rate', { ascending: false }),
-      supabase.from('quotes').select('*').order('id'),
-      supabase.from('shelf').select('*'),
-      supabase.from('user_settings').select('*').maybeSingle()
+      sb.from('profiles').select('*').single(),
+      sb.from('todos').select('*').order('created_at'),
+      sb.from('assets').select('*').order('created_at', { ascending: false }),
+      sb.from('storyboards').select('*').order('shot_no'),
+      sb.from('inspirations').select('*').order('created_at', { ascending: false }),
+      sb.from('palettes').select('*').order('created_at', { ascending: false }),
+      sb.from('components').select('*').order('created_at', { ascending: false }),
+      sb.from('requirements').select('*').order('created_at', { ascending: false }),
+      sb.from('news').select('*').order('published_at', { ascending: false }).limit(30),
+      sb.from('books').select('*').order('rate', { ascending: false }),
+      sb.from('quotes').select('*').order('id'),
+      sb.from('shelf').select('*'),
+      sb.from('user_settings').select('*').maybeSingle()
     ]);
     PROFILE = p.data || { nickname: '创作者', avatar_emoji: '✨' };
     DB.todos = t.data || []; DB.assets = a.data || []; DB.sbs = s.data || [];
@@ -135,7 +135,7 @@ async function loadAll(){
     /* 管理员探测（非管理员会抛错，静默忽略） */
     IS_ADMIN = false; DB.adminUsers = [];
     try{
-      const { data: au } = await supabase.rpc('admin_list_users');
+      const { data: au } = await sb.rpc('admin_list_users');
       if(Array.isArray(au)){ IS_ADMIN = true; DB.adminUsers = au; }
     }catch(e){ /* 非管理员 */ }
     setSync('☁ 已同步 · 📱 多端互通');
@@ -173,16 +173,16 @@ function renderAdminPanel(){
     if(!u) return;
     try{
       if(act === 'admin'){
-        await supabase.rpc('admin_set_admin', { uid, make_admin: !u.is_admin });
+        await sb.rpc('admin_set_admin', { uid, make_admin: !u.is_admin });
         toast(u.is_admin ? '👑 已取消该用户管理员' : '👑 已设为管理员');
       }else if(act === 'ban'){
         if(!u.banned_until && !confirm('确认封禁 ' + (u.email || u.nickname) + ' 7 天？封禁期间无法登录。')) return;
-        await supabase.rpc('admin_ban_user', { uid, days: u.banned_until ? 0 : 7 });
+        await sb.rpc('admin_ban_user', { uid, days: u.banned_until ? 0 : 7 });
         toast(u.banned_until ? '✅ 已解封' : '⛔ 已封禁 7 天');
       }else if(act === 'del'){
         if(u.id === USER.id){ toast('⚠ 不能删除自己的账号'); return; }
         if(!confirm('确认删除账号 ' + (u.email || u.nickname) + '？\n该用户的所有数据将永久清除，不可恢复！')) return;
-        await supabase.rpc('admin_delete_user', { uid });
+        await sb.rpc('admin_delete_user', { uid });
         toast('🗑 账号已删除');
       }
       loadAll();
@@ -235,14 +235,14 @@ function bindTodoEvents(container){
     item.querySelector('input').addEventListener('change', async e => {
       const done = e.target.checked;
       item.classList.toggle('done', done);
-      await supabase.from('todos').update({ done }).eq('id', id);
+      await sb.from('todos').update({ done }).eq('id', id);
       if(done){ chibiReact('todo-done'); }
       toast(done ? '✨ 完成！' : '已恢复待办');
       renderAll();
     });
     item.querySelector('.del').addEventListener('click', async e => {
       e.stopPropagation();
-      await supabase.from('todos').delete().eq('id', id);
+      await sb.from('todos').delete().eq('id', id);
       toast('已删除待办');
       renderAll();
     });
@@ -259,7 +259,7 @@ function renderTodos(){
 $('todo-add').addEventListener('click', async () => {
   const text = $('todo-input').value.trim();
   if(!text) return;
-  await supabase.from('todos').insert({ text, cat: $('todo-cat').value });
+  await sb.from('todos').insert({ text, cat: $('todo-cat').value });
   $('todo-input').value = '';
   toast('☑ 已添加待办');
   loadAll();
@@ -275,10 +275,10 @@ $('asset-add').addEventListener('click', async () => {
   const path = USER.id + '/' + Date.now() + '_' + file.name.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_');
   $('asset-add').disabled = true;
   try{
-    const { error: upErr } = await supabase.storage.from('assets').upload(path, file);
+    const { error: upErr } = await sb.storage.from('assets').upload(path, file);
     if(upErr) throw upErr;
-    const { data: pub } = supabase.storage.from('assets').getPublicUrl(path);
-    await supabase.from('assets').insert({
+    const { data: pub } = sb.storage.from('assets').getPublicUrl(path);
+    await sb.from('assets').insert({
       name, type, storage_path: path,
       size_mb: Math.round(file.size / 104857.6) / 10,
       duration: type === '视频' ? '—' : ''
@@ -304,7 +304,7 @@ function renderAssets(){
   $('asset-count').textContent = DB.assets.length + ' 个文件';
   $('asset-grid').innerHTML = DB.assets.map(a => {
     const { g, em } = assetThumb(a.type);
-    const { data: pub } = supabase.storage.from('assets').getPublicUrl(a.storage_path);
+    const { data: pub } = sb.storage.from('assets').getPublicUrl(a.storage_path);
     return `<div class="asset mech" data-id="${a.id}">
       <div class="thumb" style="background:${g}">${em}<span class="dur">${esc(a.duration || a.size_mb + 'MB')}</span></div>
       <h4 title="${esc(a.name)}">${esc(a.name)}</h4>
@@ -315,8 +315,8 @@ function renderAssets(){
     card.querySelector('.del').addEventListener('click', async e => {
       e.stopPropagation();
       const id = card.dataset.id, a = DB.assets.find(x => x.id === id);
-      if(a && a.storage_path) await supabase.storage.from('assets').remove([a.storage_path]);
-      await supabase.from('assets').delete().eq('id', id);
+      if(a && a.storage_path) await sb.storage.from('assets').remove([a.storage_path]);
+      await sb.from('assets').delete().eq('id', id);
       toast('已删除素材');
       loadAll();
     });
@@ -327,7 +327,7 @@ function renderAssets(){
 $('sb-add').addEventListener('click', async () => {
   const title = $('sb-title').value.trim();
   if(!title){ toast('请填写镜头内容'); return; }
-  await supabase.from('storyboards').insert({
+  await sb.from('storyboards').insert({
     project: '未命名项目',
     shot_no: DB.sbs.length + 1,
     title, scene: $('sb-scene').value.trim(), status: $('sb-status').value
@@ -351,12 +351,12 @@ function renderSbs(){
       e.stopPropagation();
       const order = ['待拍摄', '已拍摄', '剪辑中'];
       const next = order[(order.indexOf(DB.sbs.find(x => x.id === card.dataset.id).status) + 1) % 3];
-      await supabase.from('storyboards').update({ status: next }).eq('id', card.dataset.id);
+      await sb.from('storyboards').update({ status: next }).eq('id', card.dataset.id);
       loadAll();
     });
     card.querySelector('.del').addEventListener('click', async e => {
       e.stopPropagation();
-      await supabase.from('storyboards').delete().eq('id', card.dataset.id);
+      await sb.from('storyboards').delete().eq('id', card.dataset.id);
       toast('已删除镜头');
       loadAll();
     });
@@ -375,7 +375,7 @@ const IDEA_GRADS = [
 $('idea-add').addEventListener('click', async () => {
   const title = $('idea-title').value.trim();
   if(!title){ toast('请填写灵感标题'); return; }
-  await supabase.from('inspirations').insert({ title, tag: $('idea-tag').value.trim() || '灵感', url: $('idea-url').value.trim() });
+  await sb.from('inspirations').insert({ title, tag: $('idea-tag').value.trim() || '灵感', url: $('idea-url').value.trim() });
   $('idea-title').value = ''; $('idea-tag').value = ''; $('idea-url').value = '';
   toast('💡 灵感已收藏');
   loadAll();
@@ -391,7 +391,7 @@ function renderIdeas(){
   $('idea-grid').querySelectorAll('.idea').forEach(card => {
     card.querySelector('.del').addEventListener('click', async e => {
       e.stopPropagation();
-      await supabase.from('inspirations').delete().eq('id', card.dataset.id);
+      await sb.from('inspirations').delete().eq('id', card.dataset.id);
       toast('已删除灵感');
       loadAll();
     });
@@ -403,7 +403,7 @@ $('pal-add').addEventListener('click', async () => {
   const name = $('pal-name').value.trim();
   if(!name){ toast('请填写方案名'); return; }
   const colors = $('pal-colors').value.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
-  await supabase.from('palettes').insert({ name, colors, fonts: $('pal-fonts').value.trim() });
+  await sb.from('palettes').insert({ name, colors, fonts: $('pal-fonts').value.trim() });
   $('pal-name').value = ''; $('pal-colors').value = ''; $('pal-fonts').value = '';
   toast('🎨 配色方案已保存');
   loadAll();
@@ -419,7 +419,7 @@ function renderPals(){
   $('pal-grid').querySelectorAll('.sw').forEach(card => {
     card.querySelector('.del').addEventListener('click', async e => {
       e.stopPropagation();
-      await supabase.from('palettes').delete().eq('id', card.dataset.id);
+      await sb.from('palettes').delete().eq('id', card.dataset.id);
       toast('已删除方案');
       loadAll();
     });
@@ -430,7 +430,7 @@ function renderPals(){
 $('comp-add').addEventListener('click', async () => {
   const name = $('comp-name').value.trim();
   if(!name){ toast('请填写组件名'); return; }
-  await supabase.from('components').insert({ name, version: $('comp-version').value.trim() || 'v1.0' });
+  await sb.from('components').insert({ name, version: $('comp-version').value.trim() || 'v1.0' });
   $('comp-name').value = ''; $('comp-version').value = '';
   toast('🧩 组件已登记');
   loadAll();
@@ -444,7 +444,7 @@ function renderComps(){
   $('comp-grid').querySelectorAll('.comp').forEach(card => {
     card.querySelector('.del').addEventListener('click', async e => {
       e.stopPropagation();
-      await supabase.from('components').delete().eq('id', card.dataset.id);
+      await sb.from('components').delete().eq('id', card.dataset.id);
       toast('已删除组件');
       loadAll();
     });
@@ -455,7 +455,7 @@ function renderComps(){
 $('req-add').addEventListener('click', async () => {
   const title = $('req-title').value.trim();
   if(!title){ toast('请填写需求名'); return; }
-  await supabase.from('requirements').insert({ title, version: $('req-version').value.trim() || 'v1.0', status: $('req-status').value });
+  await sb.from('requirements').insert({ title, version: $('req-version').value.trim() || 'v1.0', status: $('req-status').value });
   $('req-title').value = ''; $('req-version').value = '';
   toast('📌 需求已创建');
   loadAll();
@@ -472,13 +472,13 @@ function renderReqs(){
       <button class="del" title="删除">✕</button></div>`).join('') || '<div class="empty">还没有需求，创建第一个吧</div>';
   $('req-list').querySelectorAll('.req').forEach(row => {
     row.querySelector('select').addEventListener('change', async e => {
-      await supabase.from('requirements').update({ status: e.target.value }).eq('id', row.dataset.id);
+      await sb.from('requirements').update({ status: e.target.value }).eq('id', row.dataset.id);
       toast('状态已更新');
       loadAll();
     });
     row.querySelector('.del').addEventListener('click', async e => {
       e.stopPropagation();
-      await supabase.from('requirements').delete().eq('id', row.dataset.id);
+      await sb.from('requirements').delete().eq('id', row.dataset.id);
       toast('已删除需求');
       loadAll();
     });
@@ -533,7 +533,7 @@ function renderBooks(){
         const act = btn.dataset.act;
         if(act === 'read' && book.chapters){ openReader(book); }
         else if(act === 'add'){
-          await supabase.from('shelf').upsert({ user_id: USER.id, book_id: book.id, status: '想读', progress: 0 }, { onConflict: 'user_id,book_id' });
+          await sb.from('shelf').upsert({ user_id: USER.id, book_id: book.id, status: '想读', progress: 0 }, { onConflict: 'user_id,book_id' });
           toast('📌 已加入书架');
           chibiReact('book-wish'); loadAll();
         } else if(act === 'shelf'){ nav('books'); }
@@ -559,13 +559,13 @@ function renderShelf(){
   }).join('') || '<div class="empty">书架空空，去推荐里挑一本吧</div>';
   $('shelf-list').querySelectorAll('.shelf-item').forEach(row => {
     row.querySelectorAll('[data-st]').forEach(btn => btn.addEventListener('click', async () => {
-      await supabase.from('shelf').update({ status: btn.dataset.st, progress: btn.dataset.st === '读完' ? 100 : (row.querySelector('.bar i').style.width || 0) }).eq('id', row.dataset.id);
+      await sb.from('shelf').update({ status: btn.dataset.st, progress: btn.dataset.st === '读完' ? 100 : (row.querySelector('.bar i').style.width || 0) }).eq('id', row.dataset.id);
       const b = bookMap[row.dataset.book];
       if(btn.dataset.st === '在读' && b && b.chapters) openReader(b);
       toast('书架已更新'); loadAll();
     }));
     row.querySelector('[data-del]').addEventListener('click', async () => {
-      await supabase.from('shelf').delete().eq('id', row.dataset.id);
+      await sb.from('shelf').delete().eq('id', row.dataset.id);
       toast('已移出书架'); loadAll();
     });
   });
@@ -687,7 +687,7 @@ if(finePtr){
 
 /* ---------- 设置弹窗（推送 + 引导） ---------- */
 async function getJWT(){
-  const { data } = await supabase.auth.getSession();
+  const { data } = await sb.auth.getSession();
   return data.session ? data.session.access_token : '';
 }
 function openSettings(){
@@ -703,7 +703,7 @@ $('set-save').addEventListener('click', async () => {
     feishu_webhook: $('set-feishu').value.trim(),
     serverchan_key: $('set-serverchan').value.trim()
   };
-  const { error } = await supabase.from('user_settings').upsert({ user_id: USER.id, ...row, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+  const { error } = await sb.from('user_settings').upsert({ user_id: USER.id, ...row, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
   if(error){ toast('⚠ 保存失败：' + error.message); return; }
   DB.settings = row;
   toast('💾 推送设置已保存');

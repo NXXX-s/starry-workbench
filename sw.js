@@ -1,5 +1,5 @@
 /* 星穹机甲工作台 Service Worker（子路径兼容版，适配 GitHub Pages） */
-const CACHE = 'starry-deck-v2';
+const CACHE = 'starry-deck-v3';
 const SHELL = [
   './',
   './index.html',
