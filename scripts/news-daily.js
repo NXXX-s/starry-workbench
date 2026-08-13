@@ -192,6 +192,49 @@ async function dailyDigests(sb){
   return notified;
 }
 
+/* ---------- 无效邮箱生命周期处理 ----------
+   规则：注册时邮箱无效 → 标记；每日提醒管理员（每天一次）；
+   超过配置期限（1/7/30/180/365 天，0=永久）自动删除账号 */
+async function processInvalidEmails(sb){
+  const out = { flagged: 0, reminded: 0, deleted: 0 };
+  try{
+    const { data: cfg } = await sb.from('app_config').select('key,value');
+    const map = Object.fromEntries((cfg || []).map(c => [c.key, c.value]));
+    const ttl = parseInt(map.invalid_email_ttl_days || '7', 10);
+    const { data: flagged } = await sb.rpc('cron_invalid_users');
+    if(!flagged || !flagged.length) return out;
+    const { data: admins } = await sb.from('admins').select('user_id');
+    const adminIds = (admins || []).map(a => a.user_id);
+    const now = Date.now();
+    const today = new Date().toISOString().slice(0, 10);
+    for(const u of flagged){
+      const days = (now - new Date(u.flagged_at).getTime()) / 864e5;
+      out.flagged++;
+      if(ttl > 0 && days >= ttl){
+        try{ await sb.rpc('cron_delete_user', { uid: u.user_id }); out.deleted++; }catch(e){ console.error('自动清除失败:', u.email, e.message); }
+        continue;
+      }
+      const { data: prof } = await sb.from('profiles').select('invalid_reminded_at').eq('id', u.user_id).maybeSingle();
+      const last = prof && prof.invalid_reminded_at ? new Date(prof.invalid_reminded_at).toISOString().slice(0, 10) : '';
+      if(last === today) continue;   // 今天已提醒过
+      const left = ttl > 0 ? Math.max(1, Math.ceil(ttl - days)) : null;
+      const msg = '用户 ' + u.email + ' 的邮箱无法验证，已注册 ' + Math.floor(days) + ' 天。'
+        + (left ? '距自动清除还有 ' + left + ' 天，可手动删除或延长期限。' : '已设置为永久保留，请人工处理。');
+      for(const aid of adminIds){
+        try{
+          await sb.from('notifications').insert({ user_id: aid, title: '⚠ 无效邮箱待处理', body: msg });
+          const { data: st } = await sb.from('user_settings').select('feishu_webhook,serverchan_key').eq('user_id', aid).maybeSingle();
+          if(st && st.feishu_webhook){ try{ await sendFeishu(st.feishu_webhook, '⚠ 无效邮箱待处理\n\n' + msg); }catch(e){} }
+          if(st && st.serverchan_key){ try{ await sendServerChan(st.serverchan_key, '⚠ 无效邮箱待处理', msg); }catch(e){} }
+        }catch(e){ /* 单个管理员失败不阻断 */ }
+      }
+      await sb.from('profiles').update({ invalid_reminded_at: new Date().toISOString() }).eq('id', u.user_id);
+      out.reminded++;
+    }
+  }catch(e){ console.error('无效邮箱处理失败(不阻断):', e.message); }
+  return out;
+}
+
 async function main(){
   if(!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY){
     console.error('缺少环境变量 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY');
@@ -216,7 +259,8 @@ async function main(){
   }
   let notified = 0;
   try{ notified = await dailyDigests(sb); }catch(e){ console.error('提醒失败(不阻断):', e.message); }
-  console.log(JSON.stringify({ ok: true, fetched: rows.length, added, notified, at: new Date().toISOString() }));
+  const inv = await processInvalidEmails(sb);
+  console.log(JSON.stringify({ ok: true, fetched: rows.length, added, notified, invalid: inv, at: new Date().toISOString() }));
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

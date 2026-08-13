@@ -32,10 +32,23 @@ const sb = window.supabase.createClient(
   window.APP_CONFIG.supabaseAnonKey
 );
 let USER = null, PROFILE = null, IS_ADMIN = false;
-const DB = { todos:[], assets:[], sbs:[], ideas:[], pals:[], comps:[], reqs:[], news:[], books:[], quotes:[], shelf:[], settings:{}, adminUsers:[] };
+const DB = { todos:[], assets:[], sbs:[], ideas:[], pals:[], comps:[], reqs:[], news:[], books:[], quotes:[], shelf:[], settings:{}, adminUsers:[], config:{}, notifs:[] };
 
 function setSync(txt){ $('sync-state').textContent = txt; }
 function authErr(msg){ $('auth-err').textContent = msg; }
+
+/* ---------- 邮箱有效性检查（格式 + MX 记录，阿里 DoH 国内可达） ---------- */
+function emailFormatOk(email){ return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email); }
+async function emailMxOk(email){
+  try{
+    const domain = email.split('@')[1];
+    const res = await fetch('https://dns.alidns.com/resolve?name=' + encodeURIComponent(domain) + '&type=MX', { headers: { 'accept': 'application/dns-json' } });
+    if(!res.ok) return null;
+    const j = await res.json();
+    if(!j || !Array.isArray(j.Answer)) return null;
+    return j.Answer.length > 0;
+  }catch(e){ return null; }
+}
 
 /* ---------- 登录 / 注册 ---------- */
 let authMode = 'login';
@@ -59,9 +72,27 @@ $('auth-btn').addEventListener('click', async () => {
       if(nick && data.user){
         await sb.from('profiles').update({ nickname: nick }).eq('id', data.user.id);
       }
-      toast('✨ 注册成功，请查收确认邮件后登录');
-      authMode = 'login';
-      document.querySelectorAll('[data-amode]')[0].click();
+      /* 邮箱有效性检查：格式 + MX 记录（无效也允许注册，但标记并通知管理员） */
+      if(data.user){
+        let valid = null;
+        const fmt = emailFormatOk(email);
+        const mx = fmt ? await emailMxOk(email) : false;
+        if(fmt && mx === null) valid = null;      // 网络异常 → 未知，不标记
+        else valid = fmt && mx !== false;         // 明确无效 → false
+        const patch = { email_valid: valid, email_checked_at: new Date().toISOString() };
+        if(valid === false) patch.invalid_flagged_at = new Date().toISOString();
+        try{ await sb.from('profiles').update(patch).eq('id', data.user.id); }catch(e){}
+        toast(valid === false ? '⚠ 注册成功，但邮箱无效，管理员将收到提醒' : '✨ 注册成功，邮箱验证通过');
+      } else {
+        toast('✨ 注册成功');
+      }
+      /* 自动确认已开启：注册即登录；否则留在登录页 */
+      if(data.session){
+        onAuth(data.session.user);
+      } else {
+        authMode = 'login';
+        document.querySelectorAll('[data-amode]')[0].click();
+      }
     } else {
       const { error } = await sb.auth.signInWithPassword({ email, password: pass });
       if(error) throw error;
@@ -105,14 +136,41 @@ function nav(id){
 }
 document.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', () => nav(b.dataset.nav)));
 document.querySelectorAll('[data-jump]').forEach(c => c.addEventListener('click', () => nav(c.dataset.jump)));
-$('bell').addEventListener('click', () => { nav('news'); });
+/* ---------- 铃铛：管理员通知 ---------- */
+function renderBellBadge(){
+  const badge = $('bell-badge');
+  const unread = DB.notifs.filter(x => !x.read).length;
+  if(IS_ADMIN && unread > 0){
+    badge.style.display = 'block';
+    badge.textContent = unread > 9 ? '9+' : unread;
+  } else badge.style.display = 'none';
+}
+$('bell').addEventListener('click', async () => {
+  if(IS_ADMIN && DB.notifs.length){
+    $('notif-list').innerHTML = DB.notifs.map(x => `
+      <div class="notif-item${x.read ? '' : ' unread'}">
+        <b>${esc(x.title)}</b>
+        <p>${esc(x.body)}</p>
+        <small>${new Date(x.created_at).toLocaleString('zh-CN')}</small>
+      </div>`).join('') || '<div class="empty">暂无提醒</div>';
+    $('notif-modal').classList.add('show');
+    /* 打开即全部已读 */
+    try{
+      await sb.from('notifications').update({ read: true }).eq('user_id', USER.id).is('read', false);
+      DB.notifs.forEach(x => x.read = true);
+      renderBellBadge();
+    }catch(e){}
+  } else nav('news');
+});
+$('notif-close').addEventListener('click', () => $('notif-modal').classList.remove('show'));
+$('notif-modal').addEventListener('click', e => { if(e.target === $('notif-modal')) $('notif-modal').classList.remove('show'); });
 document.addEventListener('keydown', e => { if(e.key === 'Escape') $('reader').classList.remove('show'); });
 
 /* ---------- 全量加载 ---------- */
 async function loadAll(){
   setSync('☁ 同步中…');
   try{
-    const [p, t, a, s, i, pa, c, r, n, b, q, sh, st] = await Promise.all([
+    const [p, t, a, s, i, pa, c, r, n, b, q, sh, st, co, nt] = await Promise.all([
       sb.from('profiles').select('*').single(),
       sb.from('todos').select('*').order('created_at'),
       sb.from('assets').select('*').order('created_at', { ascending: false }),
@@ -125,19 +183,24 @@ async function loadAll(){
       sb.from('books').select('*').order('rate', { ascending: false }),
       sb.from('quotes').select('*').order('id'),
       sb.from('shelf').select('*'),
-      sb.from('user_settings').select('*').maybeSingle()
+      sb.from('user_settings').select('*').maybeSingle(),
+      sb.from('app_config').select('key,value'),
+      sb.from('notifications').select('*').order('created_at', { ascending: false }).limit(20)
     ]);
     PROFILE = p.data || { nickname: '创作者', avatar_emoji: '✨' };
     DB.todos = t.data || []; DB.assets = a.data || []; DB.sbs = s.data || [];
     DB.ideas = i.data || []; DB.pals = pa.data || []; DB.comps = c.data || [];
     DB.reqs = r.data || []; DB.news = n.data || []; DB.books = b.data || [];
     DB.quotes = q.data || []; DB.shelf = sh.data || []; DB.settings = st.data || {};
+    DB.config = Object.fromEntries((co.data || []).map(x => [x.key, x.value]));
+    DB.notifs = nt.data || [];
     /* 管理员探测（非管理员会抛错，静默忽略） */
     IS_ADMIN = false; DB.adminUsers = [];
     try{
       const { data: au } = await sb.rpc('admin_list_users');
       if(Array.isArray(au)){ IS_ADMIN = true; DB.adminUsers = au; }
     }catch(e){ /* 非管理员 */ }
+    renderBellBadge();
     setSync('☁ 已同步 · 📱 多端互通');
     renderAll();
   }catch(e){
@@ -157,16 +220,26 @@ function renderAll(){
 /* ---------- 账号管理（管理员） ---------- */
 function renderAdminPanel(){
   if(!IS_ADMIN) return;
-  $('admin-list').innerHTML = DB.adminUsers.map(u => `
-    <div class="admin-row">
+  const ttl = parseInt(DB.config.invalid_email_ttl_days || '7', 10);
+  $('set-ttl').value = String(ttl);
+  $('admin-list').innerHTML = DB.adminUsers.map(u => {
+    const inv = u.email_valid === false;
+    let invTxt = '';
+    if(inv && u.invalid_flagged_at){
+      const days = Math.floor((Date.now() - new Date(u.invalid_flagged_at).getTime()) / 864e5);
+      invTxt = ttl > 0 ? `剩余 ${Math.max(0, ttl - days)} 天` : '永久保留';
+    }
+    return `<div class="admin-row">
       <div class="ar-main"><b>${esc(u.nickname)}${u.id === USER.id ? '（我）' : ''}</b>
+        ${inv ? `<span class="badge-inv">⚠ 邮箱无效 · ${invTxt}</span>` : ''}
         <small>${esc(u.email)} · 注册 ${new Date(u.created_at).toLocaleDateString('zh-CN')}${u.last_sign_in_at ? ' · 最近登录 ' + new Date(u.last_sign_in_at).toLocaleDateString('zh-CN') : ''}${u.banned_until ? ' · <span style="color:var(--magenta)">⛔ 已封禁</span>' : ''}</small></div>
       <div class="ar-actions">
         <button data-uid="${u.id}" data-act="admin">${u.is_admin ? '取消管理' : '设为管理'}</button>
         <button data-uid="${u.id}" data-act="ban">${u.banned_until ? '解封' : '封禁7天'}</button>
         <button data-uid="${u.id}" data-act="del" class="danger">删除</button>
       </div>
-    </div>`).join('') || '<div class="empty">暂无用户</div>';
+    </div>`;
+  }).join('') || '<div class="empty">暂无用户</div>';
   $('admin-list').querySelectorAll('button').forEach(btn => btn.addEventListener('click', async () => {
     const uid = btn.dataset.uid, act = btn.dataset.act;
     const u = DB.adminUsers.find(x => x.id === uid);
@@ -722,6 +795,14 @@ $('set-test').addEventListener('click', async () => {
   finally{ btn.disabled = false; }
 });
 $('set-tour').addEventListener('click', () => { $('settings-modal').classList.remove('show'); startTour(); });
+$('set-ttl-save').addEventListener('click', async () => {
+  try{
+    await sb.rpc('admin_set_config', { cfg_key: 'invalid_email_ttl_days', cfg_value: $('set-ttl').value });
+    DB.config.invalid_email_ttl_days = $('set-ttl').value;
+    renderAdminPanel();
+    toast('🧹 清除期限已保存（' + ($('set-ttl').options[$('set-ttl').selectedIndex].text) + '）');
+  }catch(e){ toast('⚠ ' + (e.message || '保存失败')); }
+});
 
 /* ---------- 新手引导（卡芙卡讲解） ---------- */
 const TOUR_STEPS = [
