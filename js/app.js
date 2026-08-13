@@ -32,7 +32,7 @@ const supabase = window.supabase.createClient(
   window.APP_CONFIG.supabaseAnonKey
 );
 let USER = null, PROFILE = null;
-const DB = { todos:[], assets:[], sbs:[], ideas:[], pals:[], comps:[], reqs:[], news:[], books:[], quotes:[], shelf:[] };
+const DB = { todos:[], assets:[], sbs:[], ideas:[], pals:[], comps:[], reqs:[], news:[], books:[], quotes:[], shelf:[], settings:{} };
 
 function setSync(txt){ $('sync-state').textContent = txt; }
 function authErr(msg){ $('auth-err').textContent = msg; }
@@ -112,7 +112,7 @@ document.addEventListener('keydown', e => { if(e.key === 'Escape') $('reader').c
 async function loadAll(){
   setSync('☁ 同步中…');
   try{
-    const [p, t, a, s, i, pa, c, r, n, b, q, sh] = await Promise.all([
+    const [p, t, a, s, i, pa, c, r, n, b, q, sh, st] = await Promise.all([
       supabase.from('profiles').select('*').single(),
       supabase.from('todos').select('*').order('created_at'),
       supabase.from('assets').select('*').order('created_at', { ascending: false }),
@@ -124,13 +124,14 @@ async function loadAll(){
       supabase.from('news').select('*').order('published_at', { ascending: false }).limit(30),
       supabase.from('books').select('*').order('rate', { ascending: false }),
       supabase.from('quotes').select('*').order('id'),
-      supabase.from('shelf').select('*')
+      supabase.from('shelf').select('*'),
+      supabase.from('user_settings').select('*').maybeSingle()
     ]);
     PROFILE = p.data || { nickname: '创作者', avatar_emoji: '✨' };
     DB.todos = t.data || []; DB.assets = a.data || []; DB.sbs = s.data || [];
     DB.ideas = i.data || []; DB.pals = pa.data || []; DB.comps = c.data || [];
     DB.reqs = r.data || []; DB.news = n.data || []; DB.books = b.data || [];
-    DB.quotes = q.data || []; DB.shelf = sh.data || [];
+    DB.quotes = q.data || []; DB.shelf = sh.data || []; DB.settings = st.data || {};
     setSync('☁ 已同步 · 📱 多端互通');
     renderAll();
   }catch(e){
@@ -639,6 +640,105 @@ if(finePtr){
       c.style.transform = 'perspective(900px) rotateY(' + (dx * 6).toFixed(2) + 'deg) rotateX(' + (-dy * 6).toFixed(2) + 'deg) translateZ(4px)';
     });
   });
+}
+
+/* ---------- 设置弹窗（推送 + 引导） ---------- */
+async function getJWT(){
+  const { data } = await supabase.auth.getSession();
+  return data.session ? data.session.access_token : '';
+}
+function openSettings(){
+  $('set-serverchan').value = DB.settings.serverchan_key || '';
+  $('set-feishu').value = DB.settings.feishu_webhook || '';
+  $('settings-modal').classList.add('show');
+}
+$('settings-btn').addEventListener('click', openSettings);
+$('settings-close').addEventListener('click', () => $('settings-modal').classList.remove('show'));
+$('settings-modal').addEventListener('click', e => { if(e.target === $('settings-modal')) $('settings-modal').classList.remove('show'); });
+$('set-save').addEventListener('click', async () => {
+  const row = {
+    feishu_webhook: $('set-feishu').value.trim(),
+    serverchan_key: $('set-serverchan').value.trim()
+  };
+  const { error } = await supabase.from('user_settings').upsert({ user_id: USER.id, ...row, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+  if(error){ toast('⚠ 保存失败：' + error.message); return; }
+  DB.settings = row;
+  toast('💾 推送设置已保存');
+});
+$('set-test').addEventListener('click', async () => {
+  const btn = $('set-test'); btn.disabled = true;
+  try{
+    const res = await fetch('/api/notify-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await getJWT() },
+      body: JSON.stringify({})
+    });
+    const j = await res.json().catch(() => ({}));
+    toast(j.ok ? '📤 测试消息已发送，去微信/飞书看看' : ('⚠ ' + (j.error || '发送失败')));
+  }catch(e){ toast('⚠ 发送失败：' + e.message); }
+  finally{ btn.disabled = false; }
+});
+$('set-tour').addEventListener('click', () => { $('settings-modal').classList.remove('show'); startTour(); });
+
+/* ---------- 新手引导（卡芙卡讲解） ---------- */
+const TOUR_STEPS = [
+  { sel: '.stats', msg: '这里是你的数据总览：今日待办、素材、灵感、情报一眼看全 📊' },
+  { sel: 'edit', msg: '🎬 剪辑工作台：素材直接上传到云端（手机拍的也能传），分镜脚本随手记。' },
+  { sel: 'design', msg: '🎨 设计工作台：灵感收藏、配色方案、组件登记、需求版本，UI 工作一条龙。' },
+  { sel: 'news', msg: '📡 新闻情报：三角洲行动 + AI 前沿，每天 08:00 自动抓取，中英双语。' },
+  { sel: 'books', msg: '📚 书单阅读：企业家书单 + 每日励志箴言 + 内置阅读器（孙子兵法、货殖列传可读）。' },
+  { sel: 'todo', msg: '☑ 待办清单：打勾勾云端同步，手机上勾完电脑马上消失。' },
+  { sel: 'chibi', msg: '我是卡芙卡～点我、拖我、双击我，陪你工作。设置里还能接微信/飞书，每天 08:00 把你的待办推到手机 💌' }
+];
+let tourIdx = 0;
+function tourTarget(sel){
+  if(sel === 'chibi') return document.getElementById('chibi');
+  if(['edit','design','news','books','todo','home'].includes(sel)){
+    return [...document.querySelectorAll('[data-nav="' + sel + '"]')].find(el => el.offsetParent !== null) || null;
+  }
+  return document.querySelector(sel);
+}
+function tourShow(){
+  const step = TOUR_STEPS[tourIdx];
+  const el = tourTarget(step.sel);
+  $('tour-msg').textContent = step.msg;
+  $('tour-next').textContent = tourIdx === TOUR_STEPS.length - 1 ? '🚀 开始使用' : '下一步 →';
+  if(el){
+    const r = el.getBoundingClientRect();
+    const pad = 10;
+    const box = $('tour-box');
+    box.style.left = Math.max(4, r.left - pad) + 'px';
+    box.style.top = Math.max(4, r.top - pad) + 'px';
+    box.style.width = (r.width + pad * 2) + 'px';
+    box.style.height = (r.height + pad * 2) + 'px';
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  } else {
+    $('tour-box').style.width = '0px'; $('tour-box').style.height = '0px';
+  }
+  chibiSay('跟着我认识一下工作台吧～');
+}
+function startTour(){
+  tourIdx = 0;
+  $('tour-mask').classList.add('show');
+  tourShow();
+  localStorage.setItem('starry_tour_v1', 'done');
+}
+$('tour-next').addEventListener('click', () => {
+  tourIdx++;
+  if(tourIdx >= TOUR_STEPS.length){
+    $('tour-mask').classList.remove('show');
+    chibiSay('都记住啦！有问题随时双击我 ✨');
+    toast('🎓 新手引导完成');
+  } else tourShow();
+});
+$('tour-skip').addEventListener('click', () => {
+  $('tour-mask').classList.remove('show');
+  chibiSay('好～需要的时候点右上角 ❓ 再找我');
+});
+$('tour-btn').addEventListener('click', startTour);
+/* 首次登录自动引导 */
+if(!localStorage.getItem('starry_tour_v1')){
+  window.addEventListener('load', () => setTimeout(() => { if(USER) startTour(); }, 900));
 }
 
 /* ---------- PWA / 启动 ---------- */

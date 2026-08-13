@@ -171,3 +171,18 @@ create table if not exists public.news (
 create index if not exists news_cat_time_idx on public.news (category, published_at desc);
 alter table public.news enable row level security;
 create policy "news_read" on public.news for select using (true);
+
+-- ---------- 13. user_settings 推送设置（微信 Server酱 / 飞书 Webhook） ----------
+create table if not exists public.user_settings (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  feishu_webhook text default '',
+  serverchan_key text default '',
+  updated_at timestamptz not null default now()
+);
+alter table public.user_settings enable row level security;
+create policy "user_settings_select_own" on public.user_settings for select using (auth.uid() = user_id);
+create policy "user_settings_insert_own" on public.user_settings for insert with check (auth.uid() = user_id);
+create policy "user_settings_update_own" on public.user_settings for update using (auth.uid() = user_id);
+
+-- 供 cron（service role）读取所有用户的推送配置：不需要额外 policy，
+-- service role 默认绕过 RLS。

@@ -1,6 +1,7 @@
 /* ============================================================
-   /api/news-cron — 每日新闻抓取（Vercel Cron 每日 00:00 UTC = 08:00 北京）
-   来源：三角洲（Reddit + 官网） / AI（机器之心、量子位、OpenAI、arXiv、HuggingFace）
+   /api/news-cron — 每日 08:00（北京时间）任务：
+   1) 抓取新闻（三角洲 Reddit+官网 / AI 五大 RSS 源）
+   2) 给所有配置了推送的用户发送「今日任务提醒」
    ============================================================ */
 'use strict';
 const { createClient } = require('@supabase/supabase-js');
@@ -80,6 +81,61 @@ async function fetchDelta(){
   return items;
 }
 
+/* ---------- 每日任务提醒（微信 Server酱 / 飞书） ---------- */
+async function sendFeishu(webhook, text){
+  const res = await fetch(webhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ msg_type: 'text', content: { text } })
+  });
+  return res.ok;
+}
+async function sendServerChan(key, title, desp){
+  const res = await fetch('https://sctapi.ftqq.com/' + key + '.send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ title, desp })
+  });
+  return res.ok;
+}
+async function dailyDigests(sb){
+  const { data: users } = await sb
+    .from('user_settings')
+    .select('user_id, feishu_webhook, serverchan_key')
+    .or('feishu_webhook.neq.,serverchan_key.neq.');
+  if(!users || !users.length) return 0;
+  const [quotes, news] = await Promise.all([
+    sb.from('quotes').select('*').order('id'),
+    sb.from('news').select('title, category, source').order('published_at', { ascending: false }).limit(4)
+  ]);
+  const qs = quotes.data || [];
+  const d = new Date(), s = new Date(d.getFullYear(), 0, 0);
+  const q = qs.length ? qs[Math.floor((d - s) / 864e5) % qs.length] : null;
+  const dNews = (news.data || []).filter(n => n.category === 'delta').slice(0, 2);
+  const aNews = (news.data || []).filter(n => n.category === 'ai').slice(0, 2);
+
+  let notified = 0;
+  for(const u of users){
+    const { data: todos } = await sb.from('todos')
+      .select('text, cat').eq('user_id', u.user_id).eq('done', false)
+      .order('created_at').limit(8);
+    const title = '⚡ 星穹机甲 · ' + (d.getMonth() + 1) + '月' + d.getDate() + '日 任务提醒';
+    const lines = [
+      '📋 今日待办' + (todos && todos.length ? '（' + todos.length + ' 项未完成）' : '：全部完成，太棒了！')
+    ];
+    (todos || []).forEach((t, i) => lines.push((i + 1) + '. [' + t.cat + '] ' + t.text));
+    if(q) lines.push('', '✨ 今日箴言：「' + q.text + '」—— ' + q.author);
+    if(dNews.length) lines.push('', '🎖 三角洲头条：' + dNews[0].title + '（' + dNews[0].source + '）');
+    if(aNews.length) lines.push('🤖 AI 头条：' + aNews[0].title + '（' + aNews[0].source + '）');
+    const desp = lines.join('\n');
+    let ok = true;
+    if(u.feishu_webhook){ try{ ok = (await sendFeishu(u.feishu_webhook, title + '\n\n' + desp)) && ok; }catch(e){ ok = false; } }
+    if(u.serverchan_key){ try{ ok = (await sendServerChan(u.serverchan_key, title, desp)) && ok; }catch(e){ ok = false; } }
+    if(ok) notified++;
+  }
+  return notified;
+}
+
 module.exports = async function handler(req, res){
   if(req.method !== 'GET' && req.method !== 'POST') return res.status(405).json({ error: 'method' });
   if(!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY){
@@ -102,5 +158,7 @@ module.exports = async function handler(req, res){
     if(error) return res.status(500).json({ error: error.message });
     added = data ? data.length : rows.length;
   }
-  res.status(200).json({ ok: true, fetched: rows.length, added, at: new Date().toISOString() });
+  let notified = 0;
+  try{ notified = await dailyDigests(sb); }catch(e){ /* 提醒失败不影响新闻 */ }
+  res.status(200).json({ ok: true, fetched: rows.length, added, notified, at: new Date().toISOString() });
 };

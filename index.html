@@ -69,6 +69,7 @@
     <div class="user">
       <div class="avatar" id="user-emoji">✨</div>
       <div><b id="user-nick">创作者</b><small><span class="dot"></span> 云端在线</small></div>
+      <button class="logout" id="settings-btn" title="推送设置 / 新手引导">⚙</button>
       <button class="logout" id="logout-btn" title="退出登录">⏻</button>
     </div>
   </aside>
@@ -77,6 +78,7 @@
     <div class="topbar">
       <div class="crumbs">工作台 / <b id="crumb">首页</b></div>
       <div class="top-right">
+        <button class="bell" id="tour-btn" title="新手引导">❓</button>
         <div class="bell" id="bell">🔔<span class="badge" id="bell-badge" style="display:none">0</span></div>
       </div>
     </div>
@@ -258,6 +260,43 @@
 </nav>
 
 <div class="toast" id="toast">☁ 已同步</div>
+
+<!-- 设置弹窗（推送 + 引导） -->
+<div class="modal-mask" id="settings-modal">
+  <div class="modal mech">
+    <div class="modal-top"><h3>⚙ 设置 · 推送 & 引导</h3><button class="x" id="settings-close">✕</button></div>
+    <div class="modal-body">
+      <div class="set-group">
+        <h4>📱 手机推送（每天 08:00 收到：未完成待办 + 今日箴言 + 新闻头条）</h4>
+        <label>微信（Server酱）SendKey</label>
+        <input id="set-serverchan" placeholder="sctpXXXX… ｜ 在 sct.ftqq.com 用微信扫码登录获取">
+        <label>飞书机器人 Webhook</label>
+        <input id="set-feishu" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/… ｜ 群设置→群机器人→添加自定义机器人">
+        <div class="set-actions">
+          <button class="btn-main" id="set-save">💾 保存</button>
+          <button class="btn-ghost" id="set-test">📤 测试推送</button>
+          <button class="btn-ghost" id="set-tour">🎓 重播新手引导</button>
+        </div>
+      </div>
+      <div class="set-group">
+        <h4>📲 安装到手机（PWA）</h4>
+        <p>iPhone Safari：分享 → 添加到主屏幕<br>Android Chrome：菜单 → 安装应用<br>之后像原生 App 一样使用</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新手引导聚光灯 -->
+<div class="tour-mask" id="tour-mask">
+  <div class="tour-box" id="tour-box"></div>
+  <div class="tour-pop mech">
+    <div class="tour-msg" id="tour-msg"></div>
+    <div class="tour-actions">
+      <button class="btn-ghost" id="tour-skip">跳过</button>
+      <button class="btn-main" id="tour-next">下一步 →</button>
+    </div>
+  </div>
+</div>
 
 <script src="js/config.js"></script>
 <script src="js/vendor/supabase.min.js"></script>
