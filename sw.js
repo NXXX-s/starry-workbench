@@ -1,16 +1,16 @@
-/* 星穹机甲工作台 Service Worker：缓存应用外壳，离线可打开 */
-const CACHE = 'starry-deck-v1';
+/* 星穹机甲工作台 Service Worker（子路径兼容版，适配 GitHub Pages） */
+const CACHE = 'starry-deck-v2';
 const SHELL = [
-  '/',
-  '/index.html',
-  '/css/app.css',
-  '/js/app.js',
-  '/js/config.js',
-  '/js/vendor/supabase.min.js',
-  '/img/kafka_poster.webp',
-  '/img/kafka_chibi.png',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png'
+  './',
+  './index.html',
+  './css/app.css',
+  './js/app.js',
+  './js/config.js',
+  './js/vendor/supabase.min.js',
+  './img/kafka_poster.webp',
+  './img/kafka_chibi.png',
+  './icons/icon-192.png',
+  './icons/icon-512.png'
 ];
 
 self.addEventListener('install', e => {
@@ -27,14 +27,14 @@ self.addEventListener('fetch', e => {
   if(req.mode === 'navigate'){
     e.respondWith(fetch(req).then(res => {
       const copy = res.clone();
-      caches.open(CACHE).then(c => c.put('/index.html', copy));
+      caches.open(CACHE).then(c => c.put('./index.html', copy));
       return res;
-    }).catch(() => caches.match('/index.html')));
+    }).catch(() => caches.match('./index.html')));
     return;
   }
   e.respondWith(
     caches.match(req).then(hit => hit || fetch(req).then(res => {
-      if(res.ok && req.url.includes('/img/') || res.ok && req.url.includes('/icons/') || res.ok && req.url.includes('/css/') || res.ok && req.url.includes('/js/')){
+      if(res.ok && (/\.(css|js|png|webp|ico|webmanifest)$/.test(url.pathname))){
         const copy = res.clone();
         caches.open(CACHE).then(c => c.put(req, copy));
       }

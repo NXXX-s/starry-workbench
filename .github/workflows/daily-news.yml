@@ -1,0 +1,22 @@
+name: daily-news
+
+on:
+  schedule:
+    - cron: '0 0 * * *'        # 每日 00:00 UTC = 08:00 北京时间
+  workflow_dispatch: {}        # 也支持手动触发
+
+jobs:
+  news:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: 抓取新闻 + 发送每日提醒
+        run: node scripts/news-daily.js
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
