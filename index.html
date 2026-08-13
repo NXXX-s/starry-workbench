@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050514">
+<meta name="description" content="星穹机甲 · 创作者工作台：剪辑/UI设计/新闻情报/书单阅读/待办，手机电脑云端互通">
+<title>星穹机甲 · 创作者工作台</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="bg"></div><div class="stars"></div><div class="stars2"></div>
+<div class="orb o1" data-depth="26"></div><div class="orb o2" data-depth="38"></div><div class="orb o3" data-depth="18"></div>
+<img class="kafka" src="img/kafka_poster.webp" alt="">
+
+<!-- ============ 登录门 ============ -->
+<div class="auth-wrap" id="auth-gate">
+  <div class="auth-card mech">
+    <div class="auth-logo">
+      <div class="hex">✦</div>
+      <div><b>星穹机甲</b><small>CREATOR DECK · 云端工作台</small></div>
+    </div>
+    <div class="auth-tabs">
+      <button class="active" data-amode="login">登 录</button>
+      <button data-amode="register">注 册</button>
+    </div>
+    <div class="auth-form">
+      <div class="auth-row" id="nick-row" style="display:none">
+        <label>昵称</label>
+        <input id="auth-nick" type="text" placeholder="你的昵称（可选）" autocomplete="nickname">
+      </div>
+      <div class="auth-row">
+        <label>邮箱</label>
+        <input id="auth-email" type="email" placeholder="you@example.com" autocomplete="email">
+      </div>
+      <div class="auth-row">
+        <label>密码</label>
+        <input id="auth-pass" type="password" placeholder="至少 6 位" autocomplete="current-password">
+      </div>
+      <div class="auth-err" id="auth-err"></div>
+      <button class="btn-main auth-btn" id="auth-btn">⚡ 进入工作台</button>
+      <p class="auth-note">开放注册 · 数据云端同步 · 手机电脑互通</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 应用主体 ============ -->
+<div class="app" id="app" style="display:none">
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="hex">✦</div>
+      <div><b>星穹机甲</b><small>CREATOR DECK</small></div>
+    </div>
+    <nav class="nav">
+      <button data-nav="home" class="active"><span class="ico">◈</span>工作台首页</button>
+      <button data-nav="edit"><span class="ico">🎬</span>剪辑工作台</button>
+      <button data-nav="design"><span class="ico">🎨</span>设计工作台</button>
+      <button data-nav="news"><span class="ico">📡</span>新闻情报</button>
+      <button data-nav="books"><span class="ico">📚</span>书单阅读</button>
+      <button data-nav="todo"><span class="ico">☑</span>待办清单</button>
+    </nav>
+    <div class="sync" id="sync-state">☁ 同步中…</div>
+    <div class="user">
+      <div class="avatar" id="user-emoji">✨</div>
+      <div><b id="user-nick">创作者</b><small><span class="dot"></span> 云端在线</small></div>
+      <button class="logout" id="logout-btn" title="退出登录">⏻</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="crumbs">工作台 / <b id="crumb">首页</b></div>
+      <div class="top-right">
+        <div class="bell" id="bell">🔔<span class="badge" id="bell-badge" style="display:none">0</span></div>
+      </div>
+    </div>
+
+    <!-- ========== 首页 ========== -->
+    <section class="view active" id="view-home">
+      <h1><span id="greet-name">你好</span> ✦</h1>
+      <p class="sub" id="greet-date"></p>
+      <div class="stats">
+        <div class="stat mech"><span class="n" id="stat-todos">0</span><span class="l">今日待办</span></div>
+        <div class="stat mech"><span class="n" id="stat-assets">0</span><span class="l">剪辑素材</span></div>
+        <div class="stat mech"><span class="n" id="stat-ideas">0</span><span class="l">灵感收藏</span></div>
+        <div class="stat mech"><span class="n" id="stat-news">0</span><span class="l">今日情报</span></div>
+      </div>
+      <div class="grid">
+        <div class="mod mech" data-jump="edit"><div class="ic">🎬</div><h3>剪辑工作台</h3><p>素材库 · 分镜脚本 · 项目工程，一次归位。</p><div class="meta"><span>云端素材库</span><span class="go">进入 →</span></div></div>
+        <div class="mod mech" data-jump="design"><div class="ic">🎨</div><h3>设计工作台</h3><p>灵感收藏 · 配色字体 · 组件与需求版本。</p><div class="meta"><span>灵感墙</span><span class="go">进入 →</span></div></div>
+        <div class="mod mech" data-jump="news"><div class="ic">📡</div><h3>新闻情报</h3><p>三角洲行动 + AI 前沿，每天 08:00 自动更新。</p><div class="meta"><span id="news-last">今日已更新</span><span class="go">进入 →</span></div></div>
+        <div class="mod mech" data-jump="books"><div class="ic">📚</div><h3>书单阅读</h3><p>企业家书单 + 每日箴言 + 内置阅读器。</p><div class="meta"><span>企业家书单 · 11 本</span><span class="go">进入 →</span></div></div>
+        <div class="mod mech" data-jump="todo"><div class="ic">☑</div><h3>待办清单</h3><p>剪辑、设计、情报分门别类，多端同步。</p><div class="meta"><span id="todo-pending">0 项未完成</span><span class="go">进入 →</span></div></div>
+      </div>
+      <div class="cols">
+        <div class="sect mech">
+          <h2>情报速览</h2>
+          <div id="home-news"><div class="empty">加载中…</div></div>
+        </div>
+        <div class="sect mech">
+          <h2>今日待办</h2>
+          <div id="home-todos"><div class="empty">加载中…</div></div>
+          <div class="bar" id="home-bar" style="display:none"><i></i><small id="home-bar-label"></small></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 剪辑 ========== -->
+    <section class="view" id="view-edit">
+      <h1>🎬 剪辑工作台</h1>
+      <p class="sub">素材管理 · 分镜脚本 · 云端存储</p>
+      <div class="sec-title">素材库 <span id="asset-count" style="font-size:12px;color:var(--muted);font-weight:400"></span></div>
+      <div class="add-row">
+        <input type="file" id="asset-file" accept="video/*,audio/*,image/*,.zip,.rar,.7z" hidden>
+        <input id="asset-name" placeholder="素材名称（留空用文件名）">
+        <select id="asset-type"><option>视频</option><option>音频</option><option>图片</option><option>工程</option></select>
+        <button class="btn-main" id="asset-add">⬆ 上传素材</button>
+      </div>
+      <div class="assets" id="asset-grid"><div class="empty">还没有素材，上传第一个吧</div></div>
+      <div class="sec-title">分镜脚本 <span id="sb-count" style="font-size:12px;color:var(--muted);font-weight:400"></span></div>
+      <div class="add-row">
+        <input id="sb-title" placeholder="镜头内容，如：空降舱穿越云层">
+        <input id="sb-scene" placeholder="画面描述（可选）">
+        <select id="sb-status"><option>待拍摄</option><option>已拍摄</option><option>剪辑中</option></select>
+        <button class="btn-main" id="sb-add">+ 添加镜头</button>
+      </div>
+      <div id="sb-list"></div>
+    </section>
+
+    <!-- ========== 设计 ========== -->
+    <section class="view" id="view-design">
+      <h1>🎨 设计工作台</h1>
+      <p class="sub">灵感收藏 · 配色字体 · 组件素材 · 需求版本</p>
+      <div class="sec-title">灵感收藏 <span id="idea-count" style="font-size:12px;color:var(--muted);font-weight:400"></span></div>
+      <div class="add-row">
+        <input id="idea-title" placeholder="灵感标题">
+        <input id="idea-tag" placeholder="标签，如 #机甲" style="max-width:140px">
+        <input id="idea-url" placeholder="链接（可选）">
+        <button class="btn-main" id="idea-add">+ 收藏灵感</button>
+      </div>
+      <div class="ideas" id="idea-grid"><div class="empty">还没有灵感，收藏第一条吧</div></div>
+      <div class="sec-title">配色方案 &amp; 字体搭配 <span id="pal-count" style="font-size:12px;color:var(--muted);font-weight:400"></span></div>
+      <div class="add-row">
+        <input id="pal-name" placeholder="方案名，如：赛博星穹">
+        <input id="pal-colors" placeholder="色值 逗号分隔：#0a0a1e,#00f5ff" style="flex:1.6">
+        <input id="pal-fonts" placeholder="字体搭配" style="max-width:160px">
+        <button class="btn-main" id="pal-add">+ 保存方案</button>
+      </div>
+      <div class="swatches" id="pal-grid"><div class="empty">还没有配色方案</div></div>
+      <div class="sec-title">组件库 <span id="comp-count" style="font-size:12px;color:var(--muted);font-weight:400"></span></div>
+      <div class="add-row">
+        <input id="comp-name" placeholder="组件名，如：霓虹按钮">
+        <input id="comp-version" placeholder="v1.0" style="max-width:120px">
+        <button class="btn-main" id="comp-add">+ 登记组件</button>
+      </div>
+      <div class="comps" id="comp-grid"><div class="empty">还没有组件</div></div>
+      <div class="sec-title">需求与版本 <span id="req-count" style="font-size:12px;color:var(--muted);font-weight:400"></span></div>
+      <div class="add-row">
+        <input id="req-title" placeholder="需求名，如：新游宣发页">
+        <input id="req-version" placeholder="v1.0" style="max-width:110px">
+        <select id="req-status"><option>评审中</option><option>进行中</option><option>已发布</option><option>草稿</option></select>
+        <button class="btn-main" id="req-add">+ 创建需求</button>
+      </div>
+      <div class="sect mech" id="req-list" style="padding-top:6px"></div>
+    </section>
+
+    <!-- ========== 新闻 ========== -->
+    <section class="view" id="view-news">
+      <h1>📡 新闻情报</h1>
+      <p class="sub">三角洲行动 × AI 前沿 · 每日自动抓取</p>
+      <div class="auto-note" id="news-meta">⏱ 每日 08:00 自动更新 · 中英双语</div>
+      <div class="tabs">
+        <button class="tab active" data-ntab="delta">🎖 三角洲行动</button>
+        <button class="tab" data-ntab="ai">🤖 AI 前线</button>
+        <button class="tab refresh" id="news-refresh">🔄 刷新</button>
+      </div>
+      <div class="news-list" id="news-list"><div class="empty">加载中…</div></div>
+    </section>
+
+    <!-- ========== 书单 ========== -->
+    <section class="view" id="view-books">
+      <h1>📚 书单与阅读</h1>
+      <p class="sub">企业家书单 · 每日箴言 · 内置阅读器</p>
+      <div class="mech quote-banner">
+        <div class="q-date">✦ 今日箴言 · 每日 08:00 自动刷新 ✦</div>
+        <div class="q-text" id="q-text">「」</div>
+        <div class="q-author" id="q-author">——</div>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-btab="rec">🔥 书籍推荐</button>
+        <button class="tab" data-btab="shelf">📖 我的书架</button>
+      </div>
+      <div id="btab-rec">
+        <div class="bgrid" id="book-grid"><div class="empty">加载中…</div></div>
+        <div class="auto-note" style="margin-top:16px">📚 正式版支持：上传 EPUB / TXT 阅读、读书笔记、进度云端同步</div>
+      </div>
+      <div id="btab-shelf" style="display:none">
+        <div class="sect mech" id="shelf-list" style="padding-top:6px"><div class="empty">书架空空，去推荐里挑一本吧</div></div>
+      </div>
+    </section>
+
+    <!-- ========== 待办 ========== -->
+    <section class="view" id="view-todo">
+      <h1>☑ 待办清单</h1>
+      <p class="sub">手机 / 电脑 / 云端三端同步 · 按分类管理</p>
+      <div class="todo-add">
+        <input id="todo-input" placeholder="添加新待办，例如：剪辑《北极光港》地图解析视频…">
+        <select id="todo-cat"><option>剪辑</option><option>设计</option><option>情报</option><option>阅读</option><option>其他</option></select>
+        <button class="btn-main" id="todo-add">+ 添加</button>
+      </div>
+      <div class="sect mech" id="todo-list"><div class="empty">加载中…</div></div>
+      <div class="bar" style="max-width:420px;display:none" id="todo-bar"><i></i><small id="todo-bar-label"></small></div>
+    </section>
+  </main>
+</div>
+
+<!-- 阅读器 -->
+<div class="reader" id="reader">
+  <div class="reader-top">
+    <span class="r-emo" id="r-emo">📖</span>
+    <div><h3 id="r-title">书名</h3><span class="r-meta" id="r-meta"></span></div>
+    <button class="x" id="r-close">✕</button>
+  </div>
+  <div class="reader-body">
+    <div class="reader-toc"><div class="toc-h">目 录</div><div id="r-toc"></div></div>
+    <div class="reader-page"><div class="page-in" id="r-page"></div></div>
+  </div>
+  <div class="reader-bar">
+    <span class="fs">字号 <button id="r-fs-m">A−</button><b id="r-fs-v">16</b><button id="r-fs-p">A+</button></span>
+    <button class="mode" id="r-night">🌙 夜间</button>
+    <button id="r-prev">上一章</button>
+    <button id="r-next">下一章</button>
+    <div class="pb"><div class="bar"><i id="r-prog" style="width:0%"></i></div></div>
+  </div>
+</div>
+
+<!-- Q版卡芙卡助手 -->
+<div class="chibi" id="chibi">
+  <span class="live-tag">● LIVE</span>
+  <div class="chibi-bubble" id="chibi-bubble">嗨，我是卡芙卡～</div>
+  <img id="chibi-img" src="img/kafka_chibi.png" alt="Q版卡芙卡">
+</div>
+
+<!-- 底部移动导航 -->
+<nav class="bottom-nav">
+  <button data-nav="home" class="active"><span class="ico">◈</span>首页</button>
+  <button data-nav="edit"><span class="ico">🎬</span>剪辑</button>
+  <button data-nav="design"><span class="ico">🎨</span>设计</button>
+  <button data-nav="news"><span class="ico">📡</span>情报</button>
+  <button data-nav="books"><span class="ico">📚</span>书单</button>
+  <button data-nav="todo"><span class="ico">☑</span>待办</button>
+</nav>
+
+<div class="toast" id="toast">☁ 已同步</div>
+
+<script src="js/config.js"></script>
+<script src="js/vendor/supabase.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

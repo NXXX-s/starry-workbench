@@ -1,0 +1,8 @@
+{
+  "crons": [
+    { "path": "/api/news-cron", "schedule": "0 0 * * *" }
+  ],
+  "functions": {
+    "api/news-cron.js": { "maxDuration": 60 }
+  }
+}

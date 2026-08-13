@@ -1,0 +1,648 @@
+/* ============================================================
+   星穹机甲 · 创作者工作台 — 应用逻辑
+   ============================================================ */
+'use strict';
+
+/* ---------- 工具 ---------- */
+const $ = id => document.getElementById(id);
+let toastTimer = null;
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function relTime(iso){
+  if(!iso) return '';
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if(s < 3600) return Math.max(1, Math.floor(s/60)) + ' 分钟前';
+  if(s < 86400) return Math.floor(s/3600) + ' 小时前';
+  if(s < 86400*30) return Math.floor(s/86400) + ' 天前';
+  return new Date(iso).toLocaleDateString('zh-CN');
+}
+const CAT_COLOR = { '剪辑':'#00f5ff', '设计':'#ff2e93', '情报':'#ffd166', '阅读':'#8b5cff', '其他':'#8a93c9' };
+
+/* ---------- Supabase 初始化 ---------- */
+if(!window.APP_CONFIG || !window.APP_CONFIG.supabaseUrl || window.APP_CONFIG.supabaseUrl.includes('YOUR-PROJECT')){
+  $('auth-err').textContent = '⚠ 请先配置 js/config.js（参考 config.example.js）';
+}
+const supabase = window.supabase.createClient(
+  window.APP_CONFIG.supabaseUrl,
+  window.APP_CONFIG.supabaseAnonKey
+);
+let USER = null, PROFILE = null;
+const DB = { todos:[], assets:[], sbs:[], ideas:[], pals:[], comps:[], reqs:[], news:[], books:[], quotes:[], shelf:[] };
+
+function setSync(txt){ $('sync-state').textContent = txt; }
+function authErr(msg){ $('auth-err').textContent = msg; }
+
+/* ---------- 登录 / 注册 ---------- */
+let authMode = 'login';
+document.querySelectorAll('[data-amode]').forEach(b => b.addEventListener('click', () => {
+  authMode = b.dataset.amode;
+  document.querySelectorAll('[data-amode]').forEach(x => x.classList.toggle('active', x === b));
+  $('nick-row').style.display = authMode === 'register' ? 'block' : 'none';
+  $('auth-btn').textContent = authMode === 'register' ? '✨ 创建账号' : '⚡ 进入工作台';
+  authErr('');
+}));
+$('auth-btn').addEventListener('click', async () => {
+  const email = $('auth-email').value.trim(), pass = $('auth-pass').value;
+  if(!email || !pass){ authErr('请填写邮箱和密码'); return; }
+  if(pass.length < 6){ authErr('密码至少 6 位'); return; }
+  const btn = $('auth-btn'); btn.disabled = true; authErr('');
+  try{
+    if(authMode === 'register'){
+      const { data, error } = await supabase.auth.signUp({ email, password: pass });
+      if(error) throw error;
+      const nick = $('auth-nick').value.trim();
+      if(nick && data.user){
+        await supabase.from('profiles').update({ nickname: nick }).eq('id', data.user.id);
+      }
+      toast('✨ 注册成功，请查收确认邮件后登录');
+      authMode = 'login';
+      document.querySelectorAll('[data-amode]')[0].click();
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+      if(error) throw error;
+    }
+  }catch(e){
+    authErr(e.message || '操作失败');
+  }finally{ btn.disabled = false; }
+});
+$('logout-btn').addEventListener('click', () => { supabase.auth.signOut(); });
+
+async function restoreSession(){
+  const { data } = await supabase.auth.getSession();
+  if(data.session) onAuth(data.session.user);
+}
+supabase.auth.onAuthStateChange((_ev, session) => {
+  if(session) onAuth(session.user);
+  else onLogout();
+});
+function onAuth(user){
+  USER = user;
+  $('auth-gate').style.display = 'none';
+  $('app').style.display = 'flex';
+  loadAll();
+}
+function onLogout(){
+  USER = null; PROFILE = null;
+  $('app').style.display = 'none';
+  $('auth-gate').style.display = 'grid';
+  $('auth-pass').value = '';
+}
+
+/* ---------- 导航 ---------- */
+const CRUMB = { home:'首页', edit:'剪辑工作台', design:'设计工作台', news:'新闻情报', books:'书单阅读', todo:'待办清单' };
+function nav(id){
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  $('view-' + id).classList.add('active');
+  document.querySelectorAll('[data-nav]').forEach(b => b.classList.toggle('active', b.dataset.nav === id));
+  $('crumb').textContent = CRUMB[id];
+  chibiReact(id);
+  window.scrollTo({ top: 0 });
+}
+document.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', () => nav(b.dataset.nav)));
+document.querySelectorAll('[data-jump]').forEach(c => c.addEventListener('click', () => nav(c.dataset.jump)));
+$('bell').addEventListener('click', () => { nav('news'); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape') $('reader').classList.remove('show'); });
+
+/* ---------- 全量加载 ---------- */
+async function loadAll(){
+  setSync('☁ 同步中…');
+  try{
+    const [p, t, a, s, i, pa, c, r, n, b, q, sh] = await Promise.all([
+      supabase.from('profiles').select('*').single(),
+      supabase.from('todos').select('*').order('created_at'),
+      supabase.from('assets').select('*').order('created_at', { ascending: false }),
+      supabase.from('storyboards').select('*').order('shot_no'),
+      supabase.from('inspirations').select('*').order('created_at', { ascending: false }),
+      supabase.from('palettes').select('*').order('created_at', { ascending: false }),
+      supabase.from('components').select('*').order('created_at', { ascending: false }),
+      supabase.from('requirements').select('*').order('created_at', { ascending: false }),
+      supabase.from('news').select('*').order('published_at', { ascending: false }).limit(30),
+      supabase.from('books').select('*').order('rate', { ascending: false }),
+      supabase.from('quotes').select('*').order('id'),
+      supabase.from('shelf').select('*')
+    ]);
+    PROFILE = p.data || { nickname: '创作者', avatar_emoji: '✨' };
+    DB.todos = t.data || []; DB.assets = a.data || []; DB.sbs = s.data || [];
+    DB.ideas = i.data || []; DB.pals = pa.data || []; DB.comps = c.data || [];
+    DB.reqs = r.data || []; DB.news = n.data || []; DB.books = b.data || [];
+    DB.quotes = q.data || []; DB.shelf = sh.data || [];
+    setSync('☁ 已同步 · 📱 多端互通');
+    renderAll();
+  }catch(e){
+    setSync('⚠ 同步失败：' + (e.message || e));
+    toast('⚠ 数据加载失败，请检查网络');
+  }
+}
+
+function renderAll(){
+  $('user-nick').textContent = PROFILE.nickname || '创作者';
+  renderHome(); renderTodos(); renderAssets(); renderSbs();
+  renderIdeas(); renderPals(); renderComps(); renderReqs();
+  renderNews(); renderBooks(); renderShelf(); renderQuote();
+}
+
+/* ---------- 首页 ---------- */
+function renderHome(){
+  const h = new Date().getHours();
+  const greet = h < 6 ? '夜深了，' : h < 12 ? '早上好，' : h < 18 ? '下午好，' : '晚上好，';
+  $('greet-name').innerHTML = greet + '<span class="g">' + esc(PROFILE.nickname || '创作者') + '</span>';
+  $('greet-date').textContent = new Date().toLocaleDateString('zh-CN', { year:'numeric', month:'long', day:'numeric', weekday:'long' });
+  const today = DB.news.filter(n => new Date(n.published_at).toDateString() === new Date().toDateString()).length;
+  $('stat-todos').textContent = DB.todos.filter(t => !t.done).length;
+  $('stat-assets').textContent = DB.assets.length;
+  $('stat-ideas').textContent = DB.ideas.length;
+  $('stat-news').textContent = today;
+  $('todo-pending').textContent = DB.todos.filter(t => !t.done).length + ' 项未完成';
+  $('news-last').textContent = DB.news.length ? '最近更新 · ' + relTime(DB.news[0].published_at) : '今日已更新';
+  $('bell-badge').style.display = today ? 'block' : 'none';
+  $('bell-badge').textContent = today;
+  /* 首页情报速览 */
+  $('home-news').innerHTML = DB.news.slice(0, 4).map(n => `
+    <div class="news-item" onclick="window.open('${esc(n.url)}','_blank')">
+      <span class="tag ${n.category === 'delta' ? 'dz' : 'ai'}">${n.category === 'delta' ? '三角洲' : 'AI'}</span>
+      <div><div class="t">${esc(n.title)}</div><div class="m">${esc(n.source)} · ${relTime(n.published_at)}</div></div>
+    </div>`).join('') || '<div class="empty">还没有新闻，等每日 08:00 自动更新</div>';
+  /* 首页待办 */
+  const top = DB.todos.slice(0, 5);
+  $('home-todos').innerHTML = top.map(t => todoItemHTML(t)).join('') || '<div class="empty">今天还没有待办</div>';
+  bindTodoEvents($('home-todos'));
+  const done = DB.todos.filter(t => t.done).length, total = DB.todos.length;
+  const bar = $('home-bar');
+  bar.style.display = total ? 'block' : 'none';
+  if(total){ bar.querySelector('i').style.width = Math.round(done/total*100) + '%'; $('home-bar-label').textContent = done + ' / ' + total + ' 项完成'; }
+}
+
+/* ---------- 待办 ---------- */
+function todoItemHTML(t){
+  return `<div class="todo-item ${t.done ? 'done' : ''}" data-id="${t.id}">
+    <input type="checkbox" ${t.done ? 'checked' : ''}>
+    <span class="t">${esc(t.text)}</span>
+    <span class="c" style="color:${CAT_COLOR[t.cat] || 'var(--muted)'};border-color:${CAT_COLOR[t.cat] || 'var(--line)'}33">${esc(t.cat)}</span>
+    <button class="del" title="删除">✕</button></div>`;
+}
+function bindTodoEvents(container){
+  container.querySelectorAll('.todo-item').forEach(item => {
+    const id = item.dataset.id;
+    item.querySelector('input').addEventListener('change', async e => {
+      const done = e.target.checked;
+      item.classList.toggle('done', done);
+      await supabase.from('todos').update({ done }).eq('id', id);
+      if(done){ chibiReact('todo-done'); }
+      toast(done ? '✨ 完成！' : '已恢复待办');
+      renderAll();
+    });
+    item.querySelector('.del').addEventListener('click', async e => {
+      e.stopPropagation();
+      await supabase.from('todos').delete().eq('id', id);
+      toast('已删除待办');
+      renderAll();
+    });
+  });
+}
+function renderTodos(){
+  $('todo-list').innerHTML = DB.todos.map(todoItemHTML).join('') || '<div class="empty">清单空空，添加第一个待办吧</div>';
+  bindTodoEvents($('todo-list'));
+  const done = DB.todos.filter(t => t.done).length, total = DB.todos.length;
+  const bar = $('todo-bar');
+  bar.style.display = total ? 'block' : 'none';
+  if(total){ bar.querySelector('i').style.width = Math.round(done/total*100) + '%'; $('todo-bar-label').textContent = done + ' / ' + total + ' 项完成'; }
+}
+$('todo-add').addEventListener('click', async () => {
+  const text = $('todo-input').value.trim();
+  if(!text) return;
+  await supabase.from('todos').insert({ text, cat: $('todo-cat').value });
+  $('todo-input').value = '';
+  toast('☑ 已添加待办');
+  loadAll();
+});
+$('todo-input').addEventListener('keydown', e => { if(e.key === 'Enter') $('todo-add').click(); });
+
+/* ---------- 素材库 ---------- */
+$('asset-add').addEventListener('click', async () => {
+  const file = $('asset-file').files[0];
+  if(!file){ toast('📎 请先选择要上传的文件'); return; }
+  const name = $('asset-name').value.trim() || file.name;
+  const type = $('asset-type').value;
+  const path = USER.id + '/' + Date.now() + '_' + file.name.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_');
+  $('asset-add').disabled = true;
+  try{
+    const { error: upErr } = await supabase.storage.from('assets').upload(path, file);
+    if(upErr) throw upErr;
+    const { data: pub } = supabase.storage.from('assets').getPublicUrl(path);
+    await supabase.from('assets').insert({
+      name, type, storage_path: path,
+      size_mb: Math.round(file.size / 104857.6) / 10,
+      duration: type === '视频' ? '—' : ''
+    });
+    toast('⬆ 上传成功：' + name);
+    $('asset-file').value = ''; $('asset-name').value = '';
+    loadAll();
+  }catch(e){
+    toast('⚠ 上传失败：' + (e.message || e));
+  }finally{ $('asset-add').disabled = false; }
+});
+function assetThumb(type){
+  const g = {
+    '视频':'linear-gradient(135deg,#1a1a3e,#3b1d6e 60%,#ff2e93)',
+    '音频':'linear-gradient(135deg,#12213f,#0e4d64)',
+    '图片':'linear-gradient(135deg,#3d1d5e,#8b5cff)',
+    '工程':'linear-gradient(135deg,#4a1030,#ff2e93)'
+  }[type] || 'linear-gradient(135deg,#12183f,#2a2f5e)';
+  const em = { '视频':'🎬','音频':'🎧','图片':'🖼️','工程':'📦' }[type] || '📁';
+  return { g, em };
+}
+function renderAssets(){
+  $('asset-count').textContent = DB.assets.length + ' 个文件';
+  $('asset-grid').innerHTML = DB.assets.map(a => {
+    const { g, em } = assetThumb(a.type);
+    const { data: pub } = supabase.storage.from('assets').getPublicUrl(a.storage_path);
+    return `<div class="asset mech" data-id="${a.id}">
+      <div class="thumb" style="background:${g}">${em}<span class="dur">${esc(a.duration || a.size_mb + 'MB')}</span></div>
+      <h4 title="${esc(a.name)}">${esc(a.name)}</h4>
+      <div class="m"><span>${esc(a.type)}</span>${a.storage_path ? `<a href="${pub.publicUrl}" target="_blank" style="color:var(--cyan);text-decoration:none">下载 ↗</a>` : ''}</div>
+      <button class="del" title="删除">✕</button></div>`;
+  }).join('') || '<div class="empty">还没有素材，点击「上传素材」添加（视频/音频/图片/工程压缩包）</div>';
+  $('asset-grid').querySelectorAll('.asset').forEach(card => {
+    card.querySelector('.del').addEventListener('click', async e => {
+      e.stopPropagation();
+      const id = card.dataset.id, a = DB.assets.find(x => x.id === id);
+      if(a && a.storage_path) await supabase.storage.from('assets').remove([a.storage_path]);
+      await supabase.from('assets').delete().eq('id', id);
+      toast('已删除素材');
+      loadAll();
+    });
+  });
+}
+
+/* ---------- 分镜 ---------- */
+$('sb-add').addEventListener('click', async () => {
+  const title = $('sb-title').value.trim();
+  if(!title){ toast('请填写镜头内容'); return; }
+  await supabase.from('storyboards').insert({
+    project: '未命名项目',
+    shot_no: DB.sbs.length + 1,
+    title, scene: $('sb-scene').value.trim(), status: $('sb-status').value
+  });
+  $('sb-title').value = ''; $('sb-scene').value = '';
+  toast('🎬 镜头已添加');
+  loadAll();
+});
+const SB_STATUS = { '待拍摄':'todo', '已拍摄':'ok', '剪辑中':'wip' };
+function renderSbs(){
+  $('sb-count').textContent = DB.sbs.length + ' 个镜头';
+  $('sb-list').innerHTML = DB.sbs.map((s, i) => `
+    <div class="sb mech" data-id="${s.id}">
+      <div class="no">${String(s.shot_no).padStart(2, '0')}</div>
+      <div><h4>${esc(s.title)} <span class="st ${SB_STATUS[s.status] || 'todo'}" data-st>${esc(s.status)}</span></h4>
+      ${s.scene ? `<p>${esc(s.scene)}</p>` : ''}</div>
+      <button class="del" title="删除">✕</button>
+    </div>`).join('') || '<div class="empty">还没有分镜脚本，添加第一个镜头吧</div>';
+  $('sb-list').querySelectorAll('.sb').forEach(card => {
+    card.querySelector('[data-st]').addEventListener('click', async e => {
+      e.stopPropagation();
+      const order = ['待拍摄', '已拍摄', '剪辑中'];
+      const next = order[(order.indexOf(DB.sbs.find(x => x.id === card.dataset.id).status) + 1) % 3];
+      await supabase.from('storyboards').update({ status: next }).eq('id', card.dataset.id);
+      loadAll();
+    });
+    card.querySelector('.del').addEventListener('click', async e => {
+      e.stopPropagation();
+      await supabase.from('storyboards').delete().eq('id', card.dataset.id);
+      toast('已删除镜头');
+      loadAll();
+    });
+  });
+}
+
+/* ---------- 灵感 ---------- */
+const IDEA_GRADS = [
+  'linear-gradient(135deg,#0a0a1e,#8b5cff 70%,#00f5ff)',
+  'linear-gradient(135deg,#2b1055,#7597de 60%,#e2a9f3)',
+  'linear-gradient(135deg,#051937,#004d7a 60%,#00f5ff)',
+  'linear-gradient(135deg,#f6d365,#fda085)',
+  'linear-gradient(135deg,#42275a,#734b6d 60%,#e0aaff)',
+  'linear-gradient(135deg,#0f2027,#2c5364 60%,#00f5ff)'
+];
+$('idea-add').addEventListener('click', async () => {
+  const title = $('idea-title').value.trim();
+  if(!title){ toast('请填写灵感标题'); return; }
+  await supabase.from('inspirations').insert({ title, tag: $('idea-tag').value.trim() || '灵感', url: $('idea-url').value.trim() });
+  $('idea-title').value = ''; $('idea-tag').value = ''; $('idea-url').value = '';
+  toast('💡 灵感已收藏');
+  loadAll();
+});
+function renderIdeas(){
+  $('idea-count').textContent = DB.ideas.length + ' 条';
+  $('idea-grid').innerHTML = DB.ideas.map((x, i) => `
+    <div class="idea mech" data-id="${x.id}">
+      <div class="thumb" style="background:${IDEA_GRADS[i % IDEA_GRADS.length]}">💡</div>
+      <h4>${esc(x.title)}</h4>
+      <div class="m"><span>${esc(x.tag)}</span>${x.url ? '<a href="' + esc(x.url) + '" target="_blank" style="color:var(--cyan);text-decoration:none">↗</a>' : ''}</div>
+      <button class="del" title="删除">✕</button></div>`).join('') || '<div class="empty">还没有灵感，收藏第一条吧</div>';
+  $('idea-grid').querySelectorAll('.idea').forEach(card => {
+    card.querySelector('.del').addEventListener('click', async e => {
+      e.stopPropagation();
+      await supabase.from('inspirations').delete().eq('id', card.dataset.id);
+      toast('已删除灵感');
+      loadAll();
+    });
+  });
+}
+
+/* ---------- 配色 ---------- */
+$('pal-add').addEventListener('click', async () => {
+  const name = $('pal-name').value.trim();
+  if(!name){ toast('请填写方案名'); return; }
+  const colors = $('pal-colors').value.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+  await supabase.from('palettes').insert({ name, colors, fonts: $('pal-fonts').value.trim() });
+  $('pal-name').value = ''; $('pal-colors').value = ''; $('pal-fonts').value = '';
+  toast('🎨 配色方案已保存');
+  loadAll();
+});
+function renderPals(){
+  $('pal-count').textContent = DB.pals.length + ' 个';
+  $('pal-grid').innerHTML = DB.pals.map(p => `
+    <div class="sw mech" data-id="${p.id}">
+      <h4>${esc(p.name)}</h4>
+      <div class="dots">${(p.colors || []).map(c => `<i style="background:${esc(c)}"></i>`).join('')}</div>
+      ${p.fonts ? `<p>字体：${esc(p.fonts)}</p>` : ''}
+      <button class="del" title="删除">✕</button></div>`).join('') || '<div class="empty">还没有配色方案，保存第一个吧</div>';
+  $('pal-grid').querySelectorAll('.sw').forEach(card => {
+    card.querySelector('.del').addEventListener('click', async e => {
+      e.stopPropagation();
+      await supabase.from('palettes').delete().eq('id', card.dataset.id);
+      toast('已删除方案');
+      loadAll();
+    });
+  });
+}
+
+/* ---------- 组件 ---------- */
+$('comp-add').addEventListener('click', async () => {
+  const name = $('comp-name').value.trim();
+  if(!name){ toast('请填写组件名'); return; }
+  await supabase.from('components').insert({ name, version: $('comp-version').value.trim() || 'v1.0' });
+  $('comp-name').value = ''; $('comp-version').value = '';
+  toast('🧩 组件已登记');
+  loadAll();
+});
+function renderComps(){
+  $('comp-count').textContent = DB.comps.length + ' 个';
+  $('comp-grid').innerHTML = DB.comps.map(c => `
+    <div class="comp mech" data-id="${c.id}">
+      <h4>${esc(c.name)}</h4><span class="v">${esc(c.version)}</span>
+      <button class="del" title="删除">✕</button></div>`).join('') || '<div class="empty">还没有组件</div>';
+  $('comp-grid').querySelectorAll('.comp').forEach(card => {
+    card.querySelector('.del').addEventListener('click', async e => {
+      e.stopPropagation();
+      await supabase.from('components').delete().eq('id', card.dataset.id);
+      toast('已删除组件');
+      loadAll();
+    });
+  });
+}
+
+/* ---------- 需求 ---------- */
+$('req-add').addEventListener('click', async () => {
+  const title = $('req-title').value.trim();
+  if(!title){ toast('请填写需求名'); return; }
+  await supabase.from('requirements').insert({ title, version: $('req-version').value.trim() || 'v1.0', status: $('req-status').value });
+  $('req-title').value = ''; $('req-version').value = '';
+  toast('📌 需求已创建');
+  loadAll();
+});
+const REQ_ST = { '评审中':'rv', '进行中':'dg', '已发布':'pb', '草稿':'df' };
+function renderReqs(){
+  $('req-count').textContent = DB.reqs.length + ' 个';
+  $('req-list').innerHTML = DB.reqs.map(r => `
+    <div class="req" data-id="${r.id}">
+      <b>${esc(r.title)}</b><span class="v">${esc(r.version)}</span>
+      <select class="st2" style="background:var(--chip);border:1px solid var(--line);color:var(--txt);border-radius:20px;padding:3px 10px;font-size:10.5px;font-family:inherit;cursor:pointer;margin-left:auto">
+        ${['评审中','进行中','已发布','草稿'].map(s => `<option ${s === r.status ? 'selected' : ''}>${s}</option>`).join('')}
+      </select>
+      <button class="del" title="删除">✕</button></div>`).join('') || '<div class="empty">还没有需求，创建第一个吧</div>';
+  $('req-list').querySelectorAll('.req').forEach(row => {
+    row.querySelector('select').addEventListener('change', async e => {
+      await supabase.from('requirements').update({ status: e.target.value }).eq('id', row.dataset.id);
+      toast('状态已更新');
+      loadAll();
+    });
+    row.querySelector('.del').addEventListener('click', async e => {
+      e.stopPropagation();
+      await supabase.from('requirements').delete().eq('id', row.dataset.id);
+      toast('已删除需求');
+      loadAll();
+    });
+  });
+}
+
+/* ---------- 新闻 ---------- */
+let newsTab = 'delta';
+document.querySelectorAll('[data-ntab]').forEach(b => b.addEventListener('click', () => {
+  if(b.dataset.ntab){ newsTab = b.dataset.ntab; document.querySelectorAll('[data-ntab]').forEach(x => x.classList.toggle('active', x === b)); renderNews(); }
+}));
+$('news-refresh').addEventListener('click', () => { loadAll(); toast('🔄 已刷新'); });
+function renderNews(){
+  const list = DB.news.filter(n => n.category === newsTab).slice(0, 20);
+  $('news-list').innerHTML = list.map(n => `
+    <div class="news-item" onclick="window.open('${esc(n.url)}','_blank')">
+      <span class="tag ${n.category === 'delta' ? 'dz' : 'ai'}">${n.category === 'delta' ? '🎖 三角洲' : '🤖 AI'}</span>
+      <div><div class="t">${esc(n.title)}</div>
+      <div class="m"><span>${esc(n.source || '未知来源')}</span><span>${relTime(n.published_at)}</span><span class="tag lang">${n.lang === 'en' ? 'EN' : '中文'}</span></div></div>
+    </div>`).join('') || '<div class="empty">暂无新闻 · 每日 08:00 自动抓取</div>';
+  $('news-meta').textContent = DB.news.length
+    ? '⏱ 每日 08:00 自动更新 · 中英双语 · 最近更新 ' + relTime(DB.news[0].published_at)
+    : '⏱ 每日 08:00 自动更新 · 中英双语';
+}
+
+/* ---------- 书单 / 箴言 ---------- */
+function renderQuote(){
+  const qs = DB.quotes;
+  if(!qs.length) return;
+  const d = new Date(), s = new Date(d.getFullYear(), 0, 0);
+  const idx = Math.floor((d - s) / 864e5) % qs.length;
+  $('q-text').textContent = '「' + qs[idx].text + '」';
+  $('q-author').textContent = '—— ' + qs[idx].author;
+}
+function renderBooks(){
+  const shelfMap = {}; DB.shelf.forEach(x => shelfMap[x.book_id] = x);
+  $('book-grid').innerHTML = DB.books.map(b => {
+    const onShelf = shelfMap[b.id];
+    return `<div class="book mech" data-id="${b.id}">
+      <div class="cover" style="background:${esc(b.grad)}">${esc(b.emoji)}<span class="ctag">${esc(b.tag)}</span><span class="crate">${'★'.repeat(b.rate || 0)}</span></div>
+      <h4>${esc(b.title)}</h4><div class="au">${esc(b.author)}</div>
+      <div class="why">${esc(b.why)}</div>
+      <div class="go"><button data-act="read">${b.chapters ? '📖 开始阅读' : '👍 想读'}</button>
+      ${onShelf ? `<button data-act="shelf" style="border-color:rgba(0,245,255,.5);color:var(--cyan)">${esc(onShelf.status)}</button>` : ''}
+      <button data-act="add">+ 书架</button></div></div>`;
+  }).join('') || '<div class="empty">加载中…</div>';
+  $('book-grid').querySelectorAll('.book').forEach(card => {
+    const book = DB.books.find(x => x.id === card.dataset.id);
+    card.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const act = btn.dataset.act;
+        if(act === 'read' && book.chapters){ openReader(book); }
+        else if(act === 'add'){
+          await supabase.from('shelf').upsert({ user_id: USER.id, book_id: book.id, status: '想读', progress: 0 }, { onConflict: 'user_id,book_id' });
+          toast('📌 已加入书架');
+          chibiReact('book-wish'); loadAll();
+        } else if(act === 'shelf'){ nav('books'); }
+      });
+    });
+  });
+}
+function renderShelf(){
+  const bookMap = {}; DB.books.forEach(b => bookMap[b.id] = b);
+  const order = { '在读':0, '想读':1, '读完':2 };
+  const items = [...DB.shelf].sort((a, b) => (order[a.status] - order[b.status]));
+  $('shelf-list').innerHTML = items.map(x => {
+    const b = bookMap[x.book_id];
+    if(!b) return '';
+    return `<div class="shelf-item" data-id="${x.id}" data-book="${b.id}">
+      <span class="em" style="background:${esc(b.grad)}">${esc(b.emoji)}</span>
+      <div><b>${esc(b.title)}</b><small>${x.status} · ${b.chapters ? '内置可读' : '纸质/其他来源'}</small></div>
+      <div class="sp"><div class="bar"><i style="width:${x.progress || 0}%"></i></div></div>
+      <div class="act">
+        ${b.chapters ? '<button data-st="在读">📖 读</button>' : ''}
+        <button data-st="想读">想读</button><button data-st="读完">读完</button>
+        <button data-del>✕</button></div></div>`;
+  }).join('') || '<div class="empty">书架空空，去推荐里挑一本吧</div>';
+  $('shelf-list').querySelectorAll('.shelf-item').forEach(row => {
+    row.querySelectorAll('[data-st]').forEach(btn => btn.addEventListener('click', async () => {
+      await supabase.from('shelf').update({ status: btn.dataset.st, progress: btn.dataset.st === '读完' ? 100 : (row.querySelector('.bar i').style.width || 0) }).eq('id', row.dataset.id);
+      const b = bookMap[row.dataset.book];
+      if(btn.dataset.st === '在读' && b && b.chapters) openReader(b);
+      toast('书架已更新'); loadAll();
+    }));
+    row.querySelector('[data-del]').addEventListener('click', async () => {
+      await supabase.from('shelf').delete().eq('id', row.dataset.id);
+      toast('已移出书架'); loadAll();
+    });
+  });
+}
+document.querySelectorAll('[data-btab]').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('[data-btab]').forEach(x => x.classList.remove('active')); t.classList.add('active');
+  $('btab-rec').style.display = t.dataset.btab === 'rec' ? 'block' : 'none';
+  $('btab-shelf').style.display = t.dataset.btab === 'shelf' ? 'block' : 'none';
+}));
+
+/* ---------- 阅读器 ---------- */
+let curBook = null, curCh = 0, fs = 16;
+function openReader(b){
+  curBook = b; curCh = 0;
+  $('r-emo').textContent = b.emoji;
+  $('r-title').textContent = b.title;
+  const toc = $('r-toc'); toc.innerHTML = '';
+  (b.chapters || []).forEach((c, i) => {
+    const btn = document.createElement('button'); btn.textContent = c.t;
+    btn.onclick = () => { curCh = i; renderCh(); };
+    toc.appendChild(btn);
+  });
+  renderCh();
+  $('reader').classList.add('show');
+  chibiReact('books');
+}
+function renderCh(){
+  const c = curBook.chapters[curCh];
+  $('r-page').innerHTML = '<h2>' + esc(c.t) + '</h2>' + c.paras.map(p => '<p>' + esc(p) + '</p>').join('');
+  $('r-toc').querySelectorAll('button').forEach((b, i) => b.classList.toggle('active', i === curCh));
+  $('r-prog').style.width = Math.round((curCh + 1) / curBook.chapters.length * 100) + '%';
+  $('r-meta').textContent = curBook.author + ' · ' + c.t + ' · ' + (curCh + 1) + '/' + curBook.chapters.length + ' 章';
+  $('r-page').scrollTop = 0;
+}
+$('r-close').onclick = () => $('reader').classList.remove('show');
+$('r-prev').onclick = () => { if(curBook && curCh > 0){ curCh--; renderCh(); } };
+$('r-next').onclick = () => { if(curBook && curCh < curBook.chapters.length - 1){ curCh++; renderCh(); } };
+$('r-fs-m').onclick = () => { fs = Math.max(13, fs - 1); applyFs(); };
+$('r-fs-p').onclick = () => { fs = Math.min(24, fs + 1); applyFs(); };
+function applyFs(){ $('r-page').style.setProperty('--fs', fs + 'px'); $('r-fs-v').textContent = fs; }
+$('r-night').onclick = function(){ this.classList.toggle('on'); $('reader').classList.toggle('night'); };
+
+/* ---------- Q版卡芙卡 ---------- */
+const chibi = $('chibi'), chibiBub = $('chibi-bubble');
+const CHIBI_MSG = {
+  home:['欢迎回来 ✨','今天想先做什么？','需要我推荐一本书吗？'],
+  edit:['剪片的时候注意节奏哦 🎬','转场再想想？','素材记得分类！'],
+  design:['这配色很有品味 ✨','字体搭配不错！','灵感收集得怎么样？'],
+  news:['有新情报，快去看看吧 📡','三角洲有更新！','AI 圈今天也很热闹'],
+  books:['看书啦？我推荐《鞋狗》👟','阅读要开护眼模式哦','孙子兵法 yyds！'],
+  todo:['打勾勾最解压了 ☑','完成一项，奖励自己一下！'],
+  'todo-done':['干得漂亮！✨','+1 完成，继续保持！','夸夸你～'],
+  'book-wish':['好品味！已记下 📌','这本书值得读！'],
+  idle:['需要咖啡吗？☕','拖着我走也可以哦～','双击有惊喜 ✨','卡芙卡在线陪工中…']
+};
+let bubTimer = null;
+function chibiSay(msg){
+  chibiBub.textContent = msg; chibiBub.classList.add('show');
+  clearTimeout(bubTimer); bubTimer = setTimeout(() => chibiBub.classList.remove('show'), 3400);
+}
+function chibiReact(key){
+  const arr = CHIBI_MSG[key] || CHIBI_MSG.idle;
+  chibiSay(arr[Math.floor(Math.random() * arr.length)]);
+}
+function chibiBurst(){
+  const emos = ['✨','❤️','💫','🎀','⭐'];
+  for(let i = 0; i < 5; i++){
+    const s = document.createElement('span'); s.className = 'part';
+    s.textContent = emos[Math.floor(Math.random() * emos.length)];
+    s.style.left = (30 + Math.random() * 70) + '%';
+    s.style.animationDelay = (Math.random() * .3) + 's';
+    document.body.appendChild(s); setTimeout(() => s.remove(), 1400);
+  }
+}
+let chibiDrag = false, chibiMoved = false, cx0 = 0, cy0 = 0, ox0 = 0, oy0 = 0;
+chibi.addEventListener('pointerdown', e => {
+  chibiDrag = true; chibiMoved = false; cx0 = e.clientX; cy0 = e.clientY;
+  const r = chibi.getBoundingClientRect(); ox0 = r.left; oy0 = r.top;
+  chibi.setPointerCapture(e.pointerId);
+});
+chibi.addEventListener('pointermove', e => {
+  if(!chibiDrag) return;
+  const dx = e.clientX - cx0, dy = e.clientY - cy0;
+  if(Math.abs(dx) + Math.abs(dy) > 6) chibiMoved = true;
+  if(chibiMoved){
+    chibi.style.left = Math.min(Math.max(ox0 + dx, 4), innerWidth - chibi.offsetWidth - 4) + 'px';
+    chibi.style.top = Math.min(Math.max(oy0 + dy, 4), innerHeight - chibi.offsetHeight - 4) + 'px';
+    chibi.style.right = 'auto'; chibi.style.bottom = 'auto';
+  }
+});
+chibi.addEventListener('pointerup', () => {
+  chibiDrag = false;
+  if(!chibiMoved){
+    chibi.classList.remove('jump'); void chibi.offsetWidth; chibi.classList.add('jump');
+    chibiBurst(); chibiReact('idle');
+  }
+});
+chibi.addEventListener('dblclick', () => { chibiBurst(); chibiSay('我是卡芙卡，星核猎手～🕸️'); });
+chibi.addEventListener('contextmenu', e => { e.preventDefault(); chibiSay('拖着我走也可以哦～'); });
+setInterval(() => { if(!chibiBub.classList.contains('show') && !chibiDrag && USER) chibiReact('idle'); }, 30000);
+
+/* ---------- 3D 倾斜 + 视差 ---------- */
+const finePtr = matchMedia('(pointer:fine)').matches && innerWidth > 1024;
+const kafkaBg = document.querySelector('.kafka');
+const orbs = [...document.querySelectorAll('.orb')];
+if(finePtr){
+  document.addEventListener('mousemove', e => {
+    const nx = e.clientX / innerWidth * 2 - 1, ny = e.clientY / innerHeight * 2 - 1;
+    orbs.forEach(o => { const d = +o.dataset.depth || 20; o.style.transform = 'translate(' + (nx * d).toFixed(1) + 'px,' + (ny * d * .6).toFixed(1) + 'px)'; });
+    kafkaBg.style.setProperty('--px', (nx * -10).toFixed(1) + 'px');
+    document.querySelectorAll('.view.active .mech').forEach(c => {
+      const r = c.getBoundingClientRect();
+      if(r.bottom < 0 || r.top > innerHeight) return;
+      const dx = (e.clientX - (r.left + r.width / 2)) / r.width, dy = (e.clientY - (r.top + r.height / 2)) / r.height;
+      c.style.transform = 'perspective(900px) rotateY(' + (dx * 6).toFixed(2) + 'deg) rotateX(' + (-dy * 6).toFixed(2) + 'deg) translateZ(4px)';
+    });
+  });
+}
+
+/* ---------- PWA / 启动 ---------- */
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+restoreSession();

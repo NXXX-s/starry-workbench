@@ -1,0 +1,14 @@
+{
+  "name": "starry-workbench",
+  "version": "1.0.0",
+  "private": true,
+  "description": "星穹机甲 · 创作者工作台（PWA：剪辑/设计/新闻/书单/待办，手机电脑互通）",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "cheerio": "0.22.0",
+    "rss-parser": "^3.13.0"
+  }
+}

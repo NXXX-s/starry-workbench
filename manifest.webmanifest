@@ -1,0 +1,15 @@
+{
+  "name": "星穹机甲 · 创作者工作台",
+  "short_name": "星穹机甲",
+  "description": "剪辑/UI设计/新闻情报/书单阅读/待办 — 手机电脑云端互通",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#050514",
+  "theme_color": "#050514",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
