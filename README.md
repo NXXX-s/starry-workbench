@@ -40,7 +40,14 @@ cp js/config.example.js js/config.js
 - Android Chrome：菜单 → 安装应用
 - 之后像原生 App 一样使用，离线也能打开界面
 
-## 五、本地开发
+## 五、手机推送（微信 / 飞书，可选但推荐）
+登录工作台后点左下角 **⚙ 设置**：
+- **微信**：打开 [sct.ftqq.com](https://sct.ftqq.com) 用微信扫码登录 → 复制 SendKey → 粘贴到设置页「微信 SendKey」→ 保存 → 点「测试推送」，微信「方糖」公众号会收到消息
+- **飞书**：飞书群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人 → 复制 Webhook → 粘贴到设置页 → 保存 → 测试
+- 之后**每天 08:00** 你会自动收到：未完成待办清单 + 今日箴言 + 三角洲/AI 新闻头条（与新闻抓取同一 cron 任务）
+- 提醒：`user_settings` 表在 `schema.sql` 第 13 节；若你之前已运行过旧版 schema，只需再运行第 13 节那一段即可
+
+## 六、本地开发
 ```bash
 npm install          # 安装 cron 函数依赖
 vercel dev           # 本地启动（需 Vercel CLI）
