@@ -1,5 +1,4 @@
 node_modules/
 .vercel/
 .env
-js/config.js
 .DS_Store
