@@ -235,6 +235,133 @@ async function processInvalidEmails(sb){
   return out;
 }
 
+/* ---------- 每日素材库（视频 + 设计灵感） ----------
+   视频：Wikimedia Commons API（免密钥，6 类）；设计：设计媒体 RSS（4 源，关键词分型）
+   缩略图下载后上传到本项目 Storage（国内可加载），过期素材自动清理 */
+const VIDEO_TYPES = [
+  { type: '自然', q: 'nature timelapse' },
+  { type: '城市', q: 'city night' },
+  { type: '科技', q: 'technology' },
+  { type: '美食', q: 'food' },
+  { type: '旅行', q: 'travel' },
+  { type: '人物', q: 'people' }
+];
+const DESIGN_FEEDS = [
+  { url: 'https://tympanus.net/codrops/feed/',            name: 'Codrops' },
+  { url: 'https://www.smashingmagazine.com/feed/',       name: 'Smashing Magazine' },
+  { url: 'https://tutorialzine.com/feed',                name: 'Tutorialzine' },
+  { url: 'https://www.creativebloq.com/rss',             name: 'Creative Bloq' }
+];
+const DESIGN_TYPE_RE = [
+  ['动效', /animat|motion|动效/i], ['图标', /icon/i], ['品牌', /brand|logo|identity|品牌/i],
+  ['海报', /poster|print|海报/i], ['APP', /app|mobile|ios|android|应用|移动/i],
+  ['网页', /web|website|landing|ui|ux|网页|界面/i]
+];
+const md5 = s => { const c = require('crypto').createHash('md5').update(s).digest('hex'); return c; };
+
+async function fetchCommonsVideos(sb, rows){
+  const out = [];
+  for(const t of VIDEO_TYPES){
+    try{
+      const res = await fetch('https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search'
+        + '&gsrsearch=' + encodeURIComponent('filetype:video ' + t.q) + '&gsrnamespace=6&gsrlimit=4'
+        + '&prop=imageinfo&iiprop=url|mime|size&iiurlwidth=640&origin=*',
+        { headers: { 'User-Agent': 'starry-deck/1.0 (personal workbench)' } });
+      if(!res.ok) continue;
+      const j = await res.json();
+      const pages = (j.query && j.query.pages) || {};
+      for(const id of Object.keys(pages)){
+        const pg = pages[id];
+        const ii = pg.imageinfo && pg.imageinfo[0];
+        if(!ii || !/^video\//.test(ii.mime || '') || !ii.thumburl) continue;
+        out.push({
+          category: 'video', type: t.type,
+          title: (pg.title || '').replace(/^File:/, '').replace(/\.[a-z0-9]+$/i, '').replace(/_/g, ' ').slice(0, 120) || t.type + ' 素材',
+          url: ii.descriptionurl, thumb: ii.thumburl, source: 'Wikimedia Commons'
+        });
+      }
+    }catch(e){ /* 单个类型失败跳过 */ }
+  }
+  return out;
+}
+
+async function fetchDesignFeed(sb, rows){
+  const out = [];
+  for(const f of DESIGN_FEEDS){
+    try{
+      const feed = await parser.parseURL(f.url);
+      for(const it of (feed.items || []).slice(0, 6)){
+        const content = it['content:encoded'] || it.content || '';
+        let thumb = it.thumbnail || '';
+        if(!thumb && content){
+          const $ = cheerio.load(content);
+          const img = $('img').first().attr('src');
+          if(img) thumb = img;
+        }
+        if(!thumb) thumb = null;   // 无图也收录，前端用占位卡片展示
+        const text = (it.title || '') + ' ' + (it.contentSnippet || '');
+        const hit = DESIGN_TYPE_RE.find(([, re]) => re.test(text));
+        out.push({
+          category: 'design',
+          type: hit ? hit[0] : '网页',
+          title: (it.title || '').trim().slice(0, 120),
+          url: it.link,
+          thumb,
+          source: f.name
+        });
+      }
+    }catch(e){ /* 源失败跳过 */ }
+  }
+  return out;
+}
+
+async function uploadThumb(sb, url, key){
+  try{
+    const res = await fetch(url, { headers: { 'User-Agent': 'starry-deck/1.0' } });
+    if(!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const path = 'daily/' + new Date().toISOString().slice(0, 10) + '/' + md5(key) + '.jpg';
+    const { error } = await sb.storage.from('assets').upload(path, new Blob([buf], { type: 'image/jpeg' }), { upsert: true, contentType: 'image/jpeg' });
+    if(error) return null;
+    return sb.storage.from('assets').getPublicUrl(path).data.publicUrl;
+  }catch(e){ return null; }
+}
+
+async function fetchDailyMaterials(sb){
+  const out = { video: 0, design: 0, deleted: 0 };
+  try{
+    const { data: cfg } = await sb.from('app_config').select('key,value');
+    const map = Object.fromEntries((cfg || []).map(c => [c.key, c.value]));
+    const retDays = parseInt(map.material_retention_days || '1', 10);
+
+    const [vids, designs] = await Promise.all([fetchCommonsVideos(sb), fetchDesignFeed(sb)]);
+    const rows = [];
+    for(const m of [...vids, ...designs]){
+      if(!m.url) continue;
+      const thumb = m.thumb ? await uploadThumb(sb, m.thumb, m.url) : null;
+      rows.push({ ...m, thumb, expires_at: retDays > 0 ? new Date(Date.now() + retDays * 864e5).toISOString() : null });
+    }
+    if(rows.length){
+      const { error } = await sb.from('daily_materials').upsert(rows, { onConflict: 'url', ignoreDuplicates: true });
+      if(!error){
+        out.video = rows.filter(r => r.category === 'video').length;
+        out.design = rows.filter(r => r.category === 'design').length;
+      }
+    }
+    /* 过期清理：删行 + 删缩略图 */
+    const { data: expired } = await sb.from('daily_materials').select('id,thumb').lt('expires_at', new Date().toISOString());
+    for(const m of (expired || [])){
+      await sb.from('daily_materials').delete().eq('id', m.id);
+      if(m.thumb){
+        const path = decodeURIComponent(m.thumb.split('/').slice(-2).join('/'));
+        try{ await sb.storage.from('assets').remove([path]); }catch(e){}
+      }
+      out.deleted++;
+    }
+  }catch(e){ console.error('每日素材抓取失败(不阻断):', e.message); }
+  return out;
+}
+
 async function main(){
   if(!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY){
     console.error('缺少环境变量 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY');
@@ -260,7 +387,8 @@ async function main(){
   let notified = 0;
   try{ notified = await dailyDigests(sb); }catch(e){ console.error('提醒失败(不阻断):', e.message); }
   const inv = await processInvalidEmails(sb);
-  console.log(JSON.stringify({ ok: true, fetched: rows.length, added, notified, invalid: inv, at: new Date().toISOString() }));
+  const mats = await fetchDailyMaterials(sb);
+  console.log(JSON.stringify({ ok: true, fetched: rows.length, added, notified, invalid: inv, materials: mats, at: new Date().toISOString() }));
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

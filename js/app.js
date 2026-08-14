@@ -32,7 +32,7 @@ const sb = window.supabase.createClient(
   window.APP_CONFIG.supabaseAnonKey
 );
 let USER = null, PROFILE = null, IS_ADMIN = false;
-const DB = { todos:[], assets:[], sbs:[], ideas:[], pals:[], comps:[], reqs:[], news:[], books:[], quotes:[], shelf:[], settings:{}, adminUsers:[], config:{}, notifs:[] };
+const DB = { todos:[], assets:[], sbs:[], ideas:[], pals:[], comps:[], reqs:[], news:[], books:[], quotes:[], shelf:[], settings:{}, adminUsers:[], config:{}, notifs:[], materials:[], mreadIds:new Set() };
 
 function setSync(txt){ $('sync-state').textContent = txt; }
 function authErr(msg){ $('auth-err').textContent = msg; }
@@ -129,7 +129,7 @@ function onLogout(){
 }
 
 /* ---------- 导航 ---------- */
-const CRUMB = { home:'首页', edit:'剪辑工作台', design:'设计工作台', news:'新闻情报', books:'书单阅读', todo:'待办清单' };
+const CRUMB = { home:'首页', edit:'剪辑工作台', design:'设计工作台', materials:'每日素材', news:'新闻情报', books:'书单阅读', todo:'待办清单' };
 function nav(id){
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   $('view-' + id).classList.add('active');
@@ -174,7 +174,7 @@ document.addEventListener('keydown', e => { if(e.key === 'Escape') $('reader').c
 async function loadAll(){
   setSync('☁ 同步中…');
   try{
-    const [p, t, a, s, i, pa, c, r, n, b, q, sh, st, co, nt] = await Promise.all([
+    const [p, t, a, s, i, pa, c, r, n, b, q, sh, st, co, nt, dm, mr] = await Promise.all([
       sb.from('profiles').select('*').single(),
       sb.from('todos').select('*').order('created_at'),
       sb.from('assets').select('*').order('created_at', { ascending: false }),
@@ -189,7 +189,9 @@ async function loadAll(){
       sb.from('shelf').select('*'),
       sb.from('user_settings').select('*').maybeSingle(),
       sb.from('app_config').select('key,value'),
-      sb.from('notifications').select('*').order('created_at', { ascending: false }).limit(20)
+      sb.from('notifications').select('*').order('created_at', { ascending: false }).limit(20),
+      sb.from('daily_materials').select('*').order('created_at', { ascending: false }).limit(80),
+      sb.from('material_reads').select('material_id')
     ]);
     PROFILE = p.data || { nickname: '创作者', avatar_emoji: '✨' };
     DB.todos = t.data || []; DB.assets = a.data || []; DB.sbs = s.data || [];
@@ -198,6 +200,8 @@ async function loadAll(){
     DB.quotes = q.data || []; DB.shelf = sh.data || []; DB.settings = st.data || {};
     DB.config = Object.fromEntries((co.data || []).map(x => [x.key, x.value]));
     DB.notifs = nt.data || [];
+    DB.materials = dm.data || [];
+    DB.mreadIds = new Set((mr.data || []).map(x => x.material_id));
     /* 管理员探测（非管理员会抛错，静默忽略） */
     IS_ADMIN = false; DB.adminUsers = [];
     try{
@@ -218,7 +222,7 @@ function renderAll(){
   renderHome(); renderTodos(); renderAssets(); renderSbs();
   renderIdeas(); renderPals(); renderComps(); renderReqs();
   renderNews(); renderBooks(); renderShelf(); renderQuote();
-  renderAdminPanel();
+  renderAdminPanel(); renderMaterials();
 }
 
 /* ---------- 账号管理（管理员） ---------- */
@@ -226,6 +230,7 @@ function renderAdminPanel(){
   if(!IS_ADMIN) return;
   const ttl = parseInt(DB.config.invalid_email_ttl_days || '7', 10);
   $('set-ttl').value = String(ttl);
+  $('set-mret').value = String(parseInt(DB.config.material_retention_days || '1', 10));
   $('admin-list').innerHTML = DB.adminUsers.map(u => {
     const inv = u.email_valid === false;
     let invTxt = '';
@@ -385,6 +390,7 @@ function renderAssets(){
     return `<div class="asset mech" data-id="${a.id}">
       <div class="thumb" style="background:${g}">${em}<span class="dur">${esc(a.duration || a.size_mb + 'MB')}</span></div>
       <h4 title="${esc(a.name)}">${esc(a.name)}</h4>
+      ${a.url ? `<a class="asset-link" href="${esc(a.url)}" target="_blank" rel="noopener">🔗 打开来源</a>` : ''}
       <div class="m"><span>${esc(a.type)}</span>${a.storage_path ? `<a href="${pub.publicUrl}" target="_blank" style="color:var(--cyan);text-decoration:none">下载 ↗</a>` : ''}</div>
       <button class="del" title="删除">✕</button></div>`;
   }).join('') || '<div class="empty">还没有素材，点击「上传素材」添加（视频/音频/图片/工程压缩包）</div>';
@@ -762,6 +768,69 @@ if(finePtr){
   });
 }
 
+/* ---------- 每日素材 ---------- */
+let matTab = 'video', matType = '';
+const MAT_EMOJI = { '自然':'🌿', '城市':'🌃', '科技':'🤖', '美食':'🍜', '旅行':'✈️', '人物':'👤', '网页':'🖥', 'APP':'📱', '动效':'✨', '图标':'🔷', '品牌':'🏷', '海报':'🖼' };
+function matFiltered(){
+  return DB.materials.filter(m => m.category === matTab && (!matType || m.type === matType));
+}
+function renderMaterials(){
+  const video = DB.materials.filter(m => m.category === 'video');
+  const design = DB.materials.filter(m => m.category === 'design');
+  $('mcnt-video').textContent = video.length;
+  $('mcnt-design').textContent = design.length;
+  $('mat-today').textContent = '今日 ' + (video.length + design.length) + ' 条素材';
+  const types = [...new Set(DB.materials.filter(m => m.category === matTab).map(m => m.type))];
+  $('mat-chips').innerHTML = '<button class="chip' + (matType === '' ? ' active' : '') + '" data-mt="">全部</button>'
+    + types.map(t => `<button class="chip${matType === t ? ' active' : ''}" data-mt="${t}">${MAT_EMOJI[t] || '📦'} ${t}</button>`).join('');
+  $('mat-chips').querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => { matType = b.dataset.mt; renderMaterials(); }));
+  const list = matFiltered();
+  $('mat-grid').innerHTML = list.length ? list.map(m => {
+    const read = DB.mreadIds.has(m.id);
+    return `<div class="mat-card mech${read ? '' : ' fresh'}" data-id="${m.id}">
+      <div class="mt-thumb">${m.thumb ? `<img src="${esc(m.thumb)}" loading="lazy" alt="">` : `<div class="mt-ph">${MAT_EMOJI[m.type] || '📦'}</div>`}${read ? '' : '<span class="mt-new">NEW</span>'}</div>
+      <div class="mt-body"><b>${esc(m.title)}</b><small>${MAT_EMOJI[m.type] || ''} ${esc(m.type)} · ${esc(m.source)} · ${relTime(m.created_at)}</small></div>
+      <div class="mt-actions">
+        <button class="mt-open" data-url="${esc(m.url)}">打开 ↗</button>
+        <button class="mt-save">${m.category === 'video' ? '📥 收进素材库' : '💡 收进灵感'}</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty">这个分类还没有素材，每天 08:00 自动刷新，稍后再来看看</div>';
+  $('mat-grid').querySelectorAll('.mat-card').forEach(card => {
+    card.querySelector('.mt-open').addEventListener('click', () => {
+      markMatRead(card.dataset.id);
+      window.open(card.querySelector('.mt-open').dataset.url, '_blank');
+    });
+    card.querySelector('.mt-save').addEventListener('click', async () => {
+      const m = DB.materials.find(x => x.id === card.dataset.id);
+      if(!m) return;
+      try{
+        if(m.category === 'video'){
+          await sb.from('assets').insert({ name: m.title, type: '视频', storage_path: '', size_mb: 0, duration: '', url: m.url });
+          toast('📥 已收进剪辑素材库');
+        } else {
+          await sb.from('inspirations').insert({ title: m.title, tag: m.type, url: m.url });
+          toast('💡 已收进设计灵感库');
+        }
+        markMatRead(m.id);
+        chibiReact('book-wish');
+        loadAll();
+      }catch(e){ toast('⚠ ' + (e.message || '收藏失败')); }
+    });
+  });
+}
+async function markMatRead(id){
+  if(DB.mreadIds.has(id)) return;
+  DB.mreadIds.add(id);
+  try{ await sb.from('material_reads').upsert({ user_id: USER.id, material_id: id }, { onConflict: 'user_id,material_id' }); }catch(e){}
+  renderMaterials();
+}
+document.querySelectorAll('[data-mtab]').forEach(b => b.addEventListener('click', () => {
+  matTab = b.dataset.mtab; matType = '';
+  document.querySelectorAll('[data-mtab]').forEach(x => x.classList.toggle('active', x === b));
+  renderMaterials();
+}));
+
 /* ---------- 设置弹窗（推送 + 引导） ---------- */
 async function getJWT(){
   const { data } = await sb.auth.getSession();
@@ -807,12 +876,20 @@ $('set-ttl-save').addEventListener('click', async () => {
     toast('🧹 清除期限已保存（' + ($('set-ttl').options[$('set-ttl').selectedIndex].text) + '）');
   }catch(e){ toast('⚠ ' + (e.message || '保存失败')); }
 });
+$('set-mret-save').addEventListener('click', async () => {
+  try{
+    await sb.rpc('admin_set_config', { cfg_key: 'material_retention_days', cfg_value: $('set-mret').value });
+    DB.config.material_retention_days = $('set-mret').value;
+    toast('📦 素材保留期限已保存（' + ($('set-mret').options[$('set-mret').selectedIndex].text) + '）');
+  }catch(e){ toast('⚠ ' + (e.message || '保存失败')); }
+});
 
 /* ---------- 新手引导（卡芙卡讲解） ---------- */
 const TOUR_STEPS = [
   { sel: '.stats', msg: '这里是你的数据总览：今日待办、素材、灵感、情报一眼看全 📊' },
   { sel: 'edit', msg: '🎬 剪辑工作台：素材直接上传到云端（手机拍的也能传），分镜脚本随手记。' },
   { sel: 'design', msg: '🎨 设计工作台：灵感收藏、配色方案、组件登记、需求版本，UI 工作一条龙。' },
+  { sel: 'materials', msg: '📦 每日素材：视频 + 设计灵感每天 08:00 自动刷新，分类型挑选，一键收进你的素材库/灵感库。' },
   { sel: 'news', msg: '📡 新闻情报：三角洲行动 + AI 前沿，每天 08:00 自动抓取，中英双语。' },
   { sel: 'books', msg: '📚 书单阅读：企业家书单 + 每日励志箴言 + 内置阅读器（孙子兵法、货殖列传可读）。' },
   { sel: 'todo', msg: '☑ 待办清单：打勾勾云端同步，手机上勾完电脑马上消失。' },
@@ -821,7 +898,7 @@ const TOUR_STEPS = [
 let tourIdx = 0;
 function tourTarget(sel){
   if(sel === 'chibi') return document.getElementById('chibi');
-  if(['edit','design','news','books','todo','home'].includes(sel)){
+  if(['edit','design','materials','news','books','todo','home'].includes(sel)){
     return [...document.querySelectorAll('[data-nav="' + sel + '"]')].find(el => el.offsetParent !== null) || null;
   }
   return document.querySelector(sel);

@@ -61,6 +61,7 @@
       <button data-nav="home" class="active"><span class="ico">◈</span>工作台首页</button>
       <button data-nav="edit"><span class="ico">🎬</span>剪辑工作台</button>
       <button data-nav="design"><span class="ico">🎨</span>设计工作台</button>
+      <button data-nav="materials"><span class="ico">📦</span>每日素材</button>
       <button data-nav="news"><span class="ico">📡</span>新闻情报</button>
       <button data-nav="books"><span class="ico">📚</span>书单阅读</button>
       <button data-nav="todo"><span class="ico">☑</span>待办清单</button>
@@ -96,6 +97,7 @@
       <div class="grid">
         <div class="mod mech" data-jump="edit"><div class="ic">🎬</div><h3>剪辑工作台</h3><p>素材库 · 分镜脚本 · 项目工程，一次归位。</p><div class="meta"><span>云端素材库</span><span class="go">进入 →</span></div></div>
         <div class="mod mech" data-jump="design"><div class="ic">🎨</div><h3>设计工作台</h3><p>灵感收藏 · 配色字体 · 组件与需求版本。</p><div class="meta"><span>灵感墙</span><span class="go">进入 →</span></div></div>
+        <div class="mod mech" data-jump="materials"><div class="ic">📦</div><h3>每日素材</h3><p>视频 + 设计灵感，每天自动刷新，分类型挑选收藏。</p><div class="meta"><span id="mat-today">今日更新中…</span><span class="go">进入 →</span></div></div>
         <div class="mod mech" data-jump="news"><div class="ic">📡</div><h3>新闻情报</h3><p>三角洲行动 + AI 前沿，每天 08:00 自动更新。</p><div class="meta"><span id="news-last">今日已更新</span><span class="go">进入 →</span></div></div>
         <div class="mod mech" data-jump="books"><div class="ic">📚</div><h3>书单阅读</h3><p>企业家书单 + 每日箴言 + 内置阅读器。</p><div class="meta"><span>企业家书单 · 11 本</span><span class="go">进入 →</span></div></div>
         <div class="mod mech" data-jump="todo"><div class="ic">☑</div><h3>待办清单</h3><p>剪辑、设计、情报分门别类，多端同步。</p><div class="meta"><span id="todo-pending">0 项未完成</span><span class="go">进入 →</span></div></div>
@@ -170,6 +172,18 @@
         <button class="btn-main" id="req-add">+ 创建需求</button>
       </div>
       <div class="sect mech" id="req-list" style="padding-top:6px"></div>
+    </section>
+
+    <!-- ========== 每日素材 ========== -->
+    <section class="view" id="view-materials">
+      <h1>📦 每日素材</h1>
+      <p class="sub">每天 08:00 自动刷新 · 点卡片打开并标记已读 · 收藏后进入你的素材库 / 灵感库 · 未读素材保留期限可在设置中调整</p>
+      <div class="mtabs">
+        <button class="mtab active" data-mtab="video">🎬 视频素材 <span id="mcnt-video" class="mcnt">0</span></button>
+        <button class="mtab" data-mtab="design">🎨 设计灵感 <span id="mcnt-design" class="mcnt">0</span></button>
+      </div>
+      <div class="chips" id="mat-chips"></div>
+      <div class="mat-grid" id="mat-grid"><div class="empty">加载中…</div></div>
     </section>
 
     <!-- ========== 新闻 ========== -->
@@ -254,6 +268,7 @@
   <button data-nav="home" class="active"><span class="ico">◈</span>首页</button>
   <button data-nav="edit"><span class="ico">🎬</span>剪辑</button>
   <button data-nav="design"><span class="ico">🎨</span>设计</button>
+  <button data-nav="materials"><span class="ico">📦</span>素材</button>
   <button data-nav="news"><span class="ico">📡</span>情报</button>
   <button data-nav="books"><span class="ico">📚</span>书单</button>
   <button data-nav="todo"><span class="ico">☑</span>待办</button>
@@ -292,6 +307,19 @@
           <button class="btn-ghost" id="set-ttl-save">保存期限</button>
         </div>
         <p class="hint">注册时邮箱无效的账号：每天提醒你处理，超过期限自动删除账号及数据</p>
+      </div>
+      <div class="set-group">
+        <h4>📦 每日素材保留期限</h4>
+        <div class="ttl-row">
+          <select id="set-mret">
+            <option value="1">1 天（默认）</option>
+            <option value="7">7 天</option>
+            <option value="30">30 天</option>
+            <option value="0">永久保留</option>
+          </select>
+          <button class="btn-ghost" id="set-mret-save">保存期限</button>
+        </div>
+        <p class="hint">自动刷新的素材过期后自动清理；已收藏到素材库/灵感库的会永久保留</p>
       </div>
       <div class="set-group">
         <h4>👑 账号管理（管理员专属）</h4>
